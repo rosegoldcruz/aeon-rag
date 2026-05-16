@@ -30,6 +30,8 @@ const MODE_INSTRUCTIONS: Record<ChatMode, string> = {
     "Return only a polished, production-ready image generation prompt based on user intent. Start with 'Image prompt:' and include style, composition, lighting, and mood.",
 }
 
+const FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"]
+
 function isMode(value: unknown): value is ChatMode {
   return value === "chat" || value === "brainstorm" || value === "plan" || value === "image_prompt"
 }
@@ -131,32 +133,72 @@ export async function POST(request: Request) {
       ? `User attached files metadata (retrieval not implemented yet): ${JSON.stringify(attachments)}`
       : ""
 
-  try {
-    const result = await generateText({
-      model: vertex(model),
-      system: [SYSTEM_PROMPT, MODE_INSTRUCTIONS[mode], styleInstruction, executionInstruction, attachmentContext]
-        .filter(Boolean)
-        .join("\n\n"),
-      prompt: message,
-    })
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+  let credentialsFileExists = false
 
-    return NextResponse.json({
-      ok: true,
-      message: result.text,
-      mode,
-      model,
-      chatId: undefined,
-    })
-  } catch (error) {
-    const safeMessage = error instanceof Error ? error.message : "Unknown Vertex request failure"
-    console.error("[api/chat] Vertex request failed", { message: safeMessage })
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: `Vertex model call failed: ${safeMessage}`,
-      },
-      { status: 502 },
-    )
+  if (credentialsPath) {
+    try {
+      await access(credentialsPath)
+      credentialsFileExists = true
+    } catch {
+      credentialsFileExists = false
+    }
   }
+
+  const candidateModels = Array.from(new Set([model, DEFAULT_MODEL, ...FALLBACK_MODELS].filter(Boolean)))
+
+  console.info("[api/chat] Vertex request start", {
+    selectedModel: model,
+    candidateModels,
+    hasProjectId: Boolean(process.env.GOOGLE_VERTEX_PROJECT),
+    hasLocation: Boolean(process.env.GOOGLE_VERTEX_LOCATION),
+    hasCredentialsPath: Boolean(credentialsPath),
+    credentialsFileExists,
+    mode,
+    attachmentCount: attachments.length,
+  })
+
+  const combinedSystem = [SYSTEM_PROMPT, MODE_INSTRUCTIONS[mode], styleInstruction, executionInstruction, attachmentContext]
+    .filter(Boolean)
+    .join("\n\n")
+
+  let lastError = "Unknown Vertex request failure"
+
+  for (const candidate of candidateModels) {
+    try {
+      const result = await generateText({
+        model: vertex(candidate),
+        system: combinedSystem,
+        prompt: message,
+      })
+
+      console.info("[api/chat] Vertex response received", {
+        usedModel: candidate,
+        textLength: result.text.length,
+      })
+
+      return NextResponse.json({
+        ok: true,
+        message: result.text,
+        mode,
+        model: candidate,
+        chatId: undefined,
+      })
+    } catch (error) {
+      const safeMessage = error instanceof Error ? error.message : "Unknown Vertex request failure"
+      lastError = safeMessage
+      console.error("[api/chat] Vertex model attempt failed", {
+        attemptedModel: candidate,
+        message: safeMessage,
+      })
+    }
+  }
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: `Vertex model call failed: ${lastError}`,
+    },
+    { status: 502 },
+  )
 }
