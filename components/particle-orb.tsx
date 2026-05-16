@@ -1,11 +1,74 @@
 "use client"
 
-import { useRef, useMemo } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Canvas, useFrame } from "@react-three/fiber"
 import type * as THREE from "three"
-import { useIsMobile } from "@/components/ui/use-mobile"
 
-function DottedSphere({ radius = 1.2, dotCount = 800, dotSize = 0.035 }) {
+type OrbTier = "portrait-mobile" | "mobile-landscape-tablet" | "desktop"
+
+type OrbConfig = {
+  radius: number
+  dotCount: number
+  dotSize: number
+  rotY: number
+  rotX: number
+  coreSegments: number
+  shellSegments: number
+  dpr: [number, number]
+  glowClass: string
+}
+
+const ORB_CONFIG: Record<OrbTier, OrbConfig> = {
+  "portrait-mobile": {
+    radius: 1.08,
+    dotCount: 320,
+    dotSize: 0.029,
+    rotY: 0.06,
+    rotX: 0.06,
+    coreSegments: 16,
+    shellSegments: 6,
+    dpr: [1, 1.2],
+    glowClass: "absolute inset-[-20%] rounded-full bg-gradient-radial from-white/20 via-white/5 to-transparent blur-2xl",
+  },
+  "mobile-landscape-tablet": {
+    radius: 1.15,
+    dotCount: 520,
+    dotSize: 0.032,
+    rotY: 0.072,
+    rotX: 0.085,
+    coreSegments: 24,
+    shellSegments: 8,
+    dpr: [1, 1.45],
+    glowClass: "absolute inset-[-24%] rounded-full bg-gradient-radial from-white/20 via-white/5 to-transparent blur-3xl",
+  },
+  desktop: {
+    radius: 1.2,
+    dotCount: 800,
+    dotSize: 0.035,
+    rotY: 0.08,
+    rotX: 0.1,
+    coreSegments: 32,
+    shellSegments: 8,
+    dpr: [1, 2],
+    glowClass: "absolute inset-[-30%] rounded-full bg-gradient-radial from-white/20 via-white/5 to-transparent blur-3xl",
+  },
+}
+
+function DottedSphere({
+  radius,
+  dotCount,
+  dotSize,
+  rotY,
+  rotX,
+  shellSegments,
+}: {
+  radius: number
+  dotCount: number
+  dotSize: number
+  rotY: number
+  rotX: number
+  shellSegments: number
+}) {
   const groupRef = useRef<THREE.Group>(null)
 
   const dots = useMemo(() => {
@@ -26,8 +89,8 @@ function DottedSphere({ radius = 1.2, dotCount = 800, dotSize = 0.035 }) {
 
   useFrame((state) => {
     if (groupRef.current) {
-      groupRef.current.rotation.y = state.clock.elapsedTime * 0.08
-      groupRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.05) * 0.1
+      groupRef.current.rotation.y = state.clock.elapsedTime * rotY
+      groupRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.05) * rotX
     }
   })
 
@@ -35,7 +98,7 @@ function DottedSphere({ radius = 1.2, dotCount = 800, dotSize = 0.035 }) {
     <group ref={groupRef}>
       {dots.map((pos, i) => (
         <mesh key={i} position={pos}>
-          <sphereGeometry args={[dotSize, 8, 8]} />
+          <sphereGeometry args={[dotSize, shellSegments, shellSegments]} />
           <meshStandardMaterial
             color="#ffffff"
             emissive="#ffffff"
@@ -49,7 +112,7 @@ function DottedSphere({ radius = 1.2, dotCount = 800, dotSize = 0.035 }) {
   )
 }
 
-function GlowingCore() {
+function GlowingCore({ coreSegments }: { coreSegments: number }) {
   const meshRef = useRef<THREE.Mesh>(null)
 
   useFrame((state) => {
@@ -61,13 +124,13 @@ function GlowingCore() {
 
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.15, 32, 32]} />
+      <sphereGeometry args={[0.15, coreSegments, coreSegments]} />
       <meshStandardMaterial color="#ffffff" emissive="#ffffff" emissiveIntensity={2} metalness={0.5} roughness={0.1} />
     </mesh>
   )
 }
 
-function Scene() {
+function Scene({ config }: { config: OrbConfig }) {
   return (
     <>
       <ambientLight intensity={0.6} />
@@ -75,34 +138,60 @@ function Scene() {
       <pointLight position={[-5, -5, -5]} intensity={1} color="#cccccc" />
       <pointLight position={[0, 0, 5]} intensity={1.5} color="#ffffff" />
 
-      <GlowingCore />
-      <DottedSphere radius={1.2} dotCount={800} dotSize={0.035} />
+      <GlowingCore coreSegments={config.coreSegments} />
+      <DottedSphere
+        radius={config.radius}
+        dotCount={config.dotCount}
+        dotSize={config.dotSize}
+        rotY={config.rotY}
+        rotX={config.rotX}
+        shellSegments={config.shellSegments}
+      />
     </>
   )
 }
 
 export function ParticleOrb() {
-  const isMobile = useIsMobile()
+  const [tier, setTier] = useState<OrbTier>("desktop")
 
-  if (isMobile) {
-    return (
-      <div className="relative h-28 w-28 sm:h-40 sm:w-40">
-        <div className="absolute inset-0 rounded-full bg-gradient-radial from-white/35 via-white/10 to-transparent blur-2xl" />
-        <div className="absolute inset-5 rounded-full border border-white/35 bg-white/10 backdrop-blur-sm" />
-      </div>
-    )
-  }
+  useEffect(() => {
+    const updateTier = () => {
+      const width = window.innerWidth
+      const height = window.innerHeight
+      const isPortraitPhone = width < 768 && height >= width
+      const isMobileLandscapeOrTablet = (width < 768 && height < width) || (width >= 768 && width < 1024)
+
+      if (isPortraitPhone) {
+        setTier("portrait-mobile")
+        return
+      }
+
+      if (isMobileLandscapeOrTablet) {
+        setTier("mobile-landscape-tablet")
+        return
+      }
+
+      setTier("desktop")
+    }
+
+    updateTier()
+    window.addEventListener("resize", updateTier)
+    return () => window.removeEventListener("resize", updateTier)
+  }, [])
+
+  const config = ORB_CONFIG[tier]
 
   return (
-    <div className="relative h-48 w-48">
+    <div className="relative mx-auto h-32 w-32 overflow-visible sm:h-40 sm:w-40 md:h-56 md:w-56 lg:h-72 lg:w-72">
       {/* Outer glow effect */}
-      <div className="absolute inset-[-30%] bg-gradient-radial from-white/20 via-white/5 to-transparent rounded-full blur-3xl" />
+      <div className={config.glowClass} />
       <Canvas
+        dpr={config.dpr}
         camera={{ position: [0, 0, 4], fov: 45 }}
         style={{ background: "transparent" }}
         gl={{ alpha: true, antialias: true }}
       >
-        <Scene />
+        <Scene config={config} />
       </Canvas>
     </div>
   )

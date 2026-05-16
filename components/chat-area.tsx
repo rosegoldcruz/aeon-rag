@@ -174,11 +174,7 @@ export function ChatArea() {
 
       {/* Main Content */}
       <div className="relative z-10 flex flex-1 flex-col items-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:px-6 sm:pb-6 sm:pt-6">
-        <div className="relative mb-4 mt-2 hidden sm:mb-8 sm:block">
-          <ParticleOrb />
-        </div>
-
-        <div className="relative mb-4 mt-2 sm:hidden">
+        <div className="relative mb-4 mt-1 w-full max-w-full overflow-visible sm:mb-8 sm:mt-2">
           <ParticleOrb />
         </div>
 
