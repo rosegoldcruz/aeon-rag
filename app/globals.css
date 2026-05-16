@@ -83,11 +83,30 @@
 }
 
 @layer base {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   * {
     @apply border-border outline-ring/50;
+    box-sizing: border-box;
   }
+
   body {
     @apply bg-background text-foreground;
+  }
+
+  pre,
+  code {
+    max-width: 100%;
+  }
+
+  pre {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -319,6 +338,22 @@
     backdrop-filter: blur(12px);
     animation: dropdown-in 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
     z-index: 50;
+  }
+
+  @media (max-width: 767px) {
+    .dropdown-menu {
+      left: auto;
+      right: 0;
+      min-width: min(92vw, 20rem);
+      max-width: 92vw;
+    }
+
+    .shader-orb-1,
+    .shader-orb-2,
+    .shader-orb-3 {
+      filter: blur(70px);
+      opacity: 0.28;
+    }
   }
 
   .dropdown-item {

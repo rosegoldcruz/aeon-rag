@@ -3,6 +3,7 @@
 import { useRef, useMemo } from "react"
 import { Canvas, useFrame } from "@react-three/fiber"
 import type * as THREE from "three"
+import { useIsMobile } from "@/components/ui/use-mobile"
 
 function DottedSphere({ radius = 1.2, dotCount = 800, dotSize = 0.035 }) {
   const groupRef = useRef<THREE.Group>(null)
@@ -81,8 +82,19 @@ function Scene() {
 }
 
 export function ParticleOrb() {
+  const isMobile = useIsMobile()
+
+  if (isMobile) {
+    return (
+      <div className="relative h-28 w-28 sm:h-40 sm:w-40">
+        <div className="absolute inset-0 rounded-full bg-gradient-radial from-white/35 via-white/10 to-transparent blur-2xl" />
+        <div className="absolute inset-5 rounded-full border border-white/35 bg-white/10 backdrop-blur-sm" />
+      </div>
+    )
+  }
+
   return (
-    <div className="w-48 h-48 relative">
+    <div className="relative h-48 w-48">
       {/* Outer glow effect */}
       <div className="absolute inset-[-30%] bg-gradient-radial from-white/20 via-white/5 to-transparent rounded-full blur-3xl" />
       <Canvas

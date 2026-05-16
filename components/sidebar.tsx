@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 
 export function Sidebar() {
   return (
-    <aside className="w-80 bg-sidebar border-r border-sidebar-border flex flex-col">
+    <aside className="hidden w-80 flex-col border-r border-sidebar-border bg-sidebar md:flex">
       {/* Header */}
       <div className="p-4 flex items-center justify-between border-b border-sidebar-border">
         <div className="flex items-center gap-2">
@@ -24,7 +24,7 @@ export function Sidebar() {
             Zyricon
           </span>
         </div>
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-sidebar-foreground">
+        <Button variant="ghost" size="icon" className="h-11 w-11 text-sidebar-foreground">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M3 3H7V7H3V3Z" fill="currentColor" opacity="0.5" />
             <path d="M9 3H13V7H9V3Z" fill="currentColor" opacity="0.5" />

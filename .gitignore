@@ -1,27 +1,37 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+.env
+.env.*
+!.env.example
 
-# dependencies
-/node_modules
+*.pem
+*.key
+*.p8
+*.p12
+*.crt
+*.cer
+*service-account*.json
+*credentials*.json
+*credential*.json
+*secret*.json
+*vertex*.json
+google-*.json
+gcp-*.json
+firebase-*.json
 
-# next.js
-/.next/
-/out/
+.vercel
+node_modules
+.next
+dist
+build
+coverage
 
-# production
-/build
-
-# debug
+logs
+*.log
 npm-debug.log*
 yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
+pnpm-debug.log*
 
-# env files
-.env*
+.DS_Store
+.vscode/settings.json
 
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
+storage/uploads
+public/uploads
