@@ -15,18 +15,170 @@ import {
   Check,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ParticleOrb } from "@/components/particle-orb"
 import { useIsMobile } from "@/components/ui/use-mobile"
 
+type SpeechRecognitionLike = {
+  continuous: boolean
+  interimResults: boolean
+  lang: string
+  onstart: (() => void) | null
+  onend: (() => void) | null
+  onresult: ((event: {
+    resultIndex: number
+    results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>
+  }) => void) | null
+  onerror: ((event: { error: string }) => void) | null
+  start: () => void
+  stop: () => void
+}
+
+type SpeechRecognitionCtor = new () => SpeechRecognitionLike
+
 export function ChatArea() {
   const isMobile = useIsMobile()
-  const [isRecording, setIsRecording] = useState(false)
+  const [inputMessage, setInputMessage] = useState("")
+  const [isListening, setIsListening] = useState(false)
+  const [isRequestingMic, setIsRequestingMic] = useState(false)
+  const [voiceMessage, setVoiceMessage] = useState("")
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
   const [configDropdownOpen, setConfigDropdownOpen] = useState(false)
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const waveBarCount = isMobile ? 28 : 60
+
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
+  const finalTranscriptRef = useRef("")
+  const baseInputRef = useRef("")
+  const heardSpeechRef = useRef(false)
+
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop()
+      recognitionRef.current = null
+    }
+  }, [])
+
+  const stopListening = (discardTranscript: boolean) => {
+    if (discardTranscript) {
+      setInputMessage(baseInputRef.current)
+      finalTranscriptRef.current = ""
+      heardSpeechRef.current = false
+    }
+
+    if (recognitionRef.current) {
+      recognitionRef.current.stop()
+    }
+  }
+
+  const startVoiceInput = async () => {
+    if (typeof window === "undefined") return
+
+    if (isListening || isRequestingMic) {
+      return
+    }
+
+    const SpeechRecognitionCtor = (window as typeof window & {
+      SpeechRecognition?: SpeechRecognitionCtor
+      webkitSpeechRecognition?: SpeechRecognitionCtor
+    }).SpeechRecognition ||
+      (window as typeof window & { webkitSpeechRecognition?: SpeechRecognitionCtor }).webkitSpeechRecognition
+
+    if (!SpeechRecognitionCtor) {
+      setVoiceMessage("Voice input is not supported in this browser yet.")
+      return
+    }
+
+    setVoiceMessage("")
+    setIsRequestingMic(true)
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setVoiceMessage("Voice input is not supported in this browser yet.")
+        setIsRequestingMic(false)
+        return
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream.getTracks().forEach((track) => track.stop())
+
+      baseInputRef.current = inputMessage.trim()
+      finalTranscriptRef.current = ""
+      heardSpeechRef.current = false
+
+      const recognition = new SpeechRecognitionCtor()
+      recognition.continuous = false
+      recognition.interimResults = true
+      recognition.lang = "en-US"
+
+      recognition.onstart = () => {
+        setIsListening(true)
+        setIsRequestingMic(false)
+        setVoiceMessage("")
+      }
+
+      recognition.onend = () => {
+        setIsListening(false)
+        setIsRequestingMic(false)
+        recognitionRef.current = null
+
+        if (!heardSpeechRef.current) {
+          setVoiceMessage("No speech detected. Try again.")
+        }
+      }
+
+      recognition.onresult = (event) => {
+        let finalPart = ""
+        let interimPart = ""
+
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const segment = event.results[i][0].transcript.trim()
+          if (!segment) {
+            continue
+          }
+          heardSpeechRef.current = true
+
+          if (event.results[i].isFinal) {
+            finalPart = `${finalPart} ${segment}`.trim()
+          } else {
+            interimPart = `${interimPart} ${segment}`.trim()
+          }
+        }
+
+        if (finalPart) {
+          finalTranscriptRef.current = `${finalTranscriptRef.current} ${finalPart}`.trim()
+        }
+
+        const prefix = baseInputRef.current
+        const mergedTranscript = [finalTranscriptRef.current, interimPart].filter(Boolean).join(" ").trim()
+        const merged = [prefix, mergedTranscript].filter(Boolean).join(prefix ? "\n" : "")
+        setInputMessage(merged)
+      }
+
+      recognition.onerror = (event) => {
+        if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+          setVoiceMessage("Microphone permission denied.")
+        } else if (event.error === "no-speech") {
+          setVoiceMessage("No speech detected. Try again.")
+        } else if (event.error === "audio-capture") {
+          setVoiceMessage("Microphone permission denied.")
+        } else {
+          setVoiceMessage("Could not transcribe audio. Recording stopped.")
+        }
+
+        setIsListening(false)
+        setIsRequestingMic(false)
+      }
+
+      recognitionRef.current = recognition
+      recognition.start()
+    } catch {
+      setIsListening(false)
+      setIsRequestingMic(false)
+      setVoiceMessage("Microphone permission denied.")
+    }
+  }
 
   return (
     <main className="relative flex min-h-[100dvh] flex-1 flex-col overflow-hidden overflow-x-hidden">
@@ -210,7 +362,7 @@ export function ChatArea() {
 
         {/* Input Area */}
         <div className="mt-auto w-full max-w-4xl">
-          {isRecording && (
+          {isListening && (
             <div className="input-3d animate-in slide-in-from-bottom-2 mb-3 rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl duration-300 fade-in sm:rounded-full sm:px-6">
               <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-6">
                 {/* Left: Recording indicator */}
@@ -240,14 +392,14 @@ export function ChatArea() {
                     variant="ghost"
                     size="icon"
                     className="btn-3d h-11 w-11 rounded-full bg-secondary/30 text-white hover:bg-destructive/20 hover:text-destructive"
-                    onClick={() => setIsRecording(false)}
+                    onClick={() => stopListening(true)}
                   >
                     <X className="w-4 h-4" />
                   </Button>
                   <Button
                     size="icon"
                     className="btn-3d btn-glow h-11 w-11 rounded-full bg-gradient-to-br from-primary via-gray-900 to-black text-white shadow-xl hover:from-gray-900 hover:to-black"
-                    onClick={() => setIsRecording(false)}
+                    onClick={() => stopListening(false)}
                   >
                     <Check className="w-4 h-4" />
                   </Button>
@@ -261,9 +413,16 @@ export function ChatArea() {
               <div className="flex items-start gap-3">
                 <textarea
                   placeholder="Ask Anything..."
+                  value={inputMessage}
+                  onChange={(event) => setInputMessage(event.target.value)}
                   className="min-h-[96px] w-full flex-1 resize-none border-none bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground sm:min-h-[80px] sm:text-lg"
                 />
               </div>
+              {(isRequestingMic || voiceMessage) && (
+                <p className="text-xs text-muted-foreground">
+                  {isRequestingMic ? "Requesting microphone permission..." : voiceMessage}
+                </p>
+              )}
               <div className="flex flex-col gap-3 border-t border-border/30 pt-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <Button
@@ -300,8 +459,15 @@ export function ChatArea() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="btn-3d h-11 w-11 text-white hover:text-foreground"
-                    onClick={() => setIsRecording(true)}
+                    className={`btn-3d h-11 w-11 text-white hover:text-foreground ${isListening ? "bg-primary/20 ring-1 ring-primary/60" : ""}`}
+                    aria-label={isListening ? "Stop voice input" : "Start voice input"}
+                    onClick={() => {
+                      if (isListening) {
+                        stopListening(false)
+                        return
+                      }
+                      void startVoiceInput()
+                    }}
                   >
                     <Mic className="w-4 h-4" />
                   </Button>
