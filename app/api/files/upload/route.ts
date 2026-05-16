@@ -2,11 +2,11 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { extname, basename } from "node:path"
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
-import { createDocument, replaceDocumentChunks, updateDocumentStatus } from "@/lib/rag/db"
-import { chunkText, embedChunks, extractTextFromStoredFile } from "@/lib/rag/text"
+import { ingestStoredFile } from "@/lib/ingest"
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
 const UPLOAD_DIR = "/home/aeon-rag/storage/uploads"
+const INLINE_INGEST_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv", ".pdf"])
 const ALLOWED_EXTENSIONS = new Set([
   ".pdf",
   ".txt",
@@ -91,8 +91,6 @@ export async function POST(request: Request) {
   const storedName = `${id}-${sanitized}`
   const storagePath = `${UPLOAD_DIR}/${storedName}`
   const relativeStoredPath = `storage/uploads/${storedName}`
-  const absoluteStoredPath = `/home/aeon-rag/${relativeStoredPath}`
-  let documentId: string | null = null
 
   try {
     await mkdir(UPLOAD_DIR, { recursive: true })
@@ -111,89 +109,58 @@ export async function POST(request: Request) {
     )
   }
 
-  try {
-    const document = await createDocument({
-      originalName: sanitized,
-      storedPath: relativeStoredPath,
-      mimeType: file.type || extension.replace(".", "") || "application/octet-stream",
-      sizeBytes: file.size,
-      status: "uploaded",
-    })
-    documentId = document.id
-  } catch (error) {
-    const safeMessage = error instanceof Error ? error.message : "Unknown document insert failure"
-    console.error("[api/files/upload] Document registration failed", { message: safeMessage })
-
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "File saved, but failed to register in document index.",
-      },
-      { status: 500 },
-    )
-  }
-
-  let status: "uploaded" | "indexed" | "failed" = "uploaded"
-  let indexingMessage = ""
+  let ingested = false
+  let ingestError = ""
+  let documentId: string | undefined
   let chunkCount = 0
+  let status: "uploaded" | "indexed" | "failed" = "uploaded"
+  const fileType = file.type || extension.replace(".", "") || "application/octet-stream"
 
-  try {
-    const parsed = await extractTextFromStoredFile(absoluteStoredPath, sanitized)
+  if (INLINE_INGEST_EXTENSIONS.has(extension)) {
+    try {
+      const ingestedResult = await ingestStoredFile({
+        storedPath: relativeStoredPath,
+        name: sanitized,
+        type: fileType,
+        sizeBytes: file.size,
+      })
 
-    if (!parsed.supported || !parsed.text) {
-      status = "uploaded"
-      indexingMessage = parsed.message || "Parsing for this format is coming next."
-    } else {
-      const chunks = chunkText(parsed.text)
+      ingested = true
+      documentId = ingestedResult.documentId
+      chunkCount = ingestedResult.chunkCount
+      status = "indexed"
+    } catch (error) {
+      const safeMessage = error instanceof Error ? error.message : "Unknown indexing failure"
+      ingestError = safeMessage
 
-      if (chunks.length === 0) {
-        status = "failed"
-        indexingMessage = "No extractable text found for indexing."
-        if (documentId) {
-          await updateDocumentStatus(documentId, "failed")
-        }
+      if (
+        safeMessage.includes("Unsupported file type") ||
+        safeMessage.includes("coming next") ||
+        safeMessage.includes("No chunks")
+      ) {
+        status = "uploaded"
       } else {
-        const embeddings = await embedChunks(chunks)
-
-        if (documentId) {
-          await replaceDocumentChunks(
-            documentId,
-            chunks.map((content, chunkIndex) => ({
-              chunkIndex,
-              content,
-              embedding: embeddings[chunkIndex],
-            })),
-          )
-          await updateDocumentStatus(documentId, "indexed")
-        }
-
-        status = "indexed"
-        chunkCount = chunks.length
-        indexingMessage = `Indexed ${chunkCount} chunks for retrieval.`
+        status = "failed"
       }
     }
-  } catch (error) {
-    const safeMessage = error instanceof Error ? error.message : "Unknown indexing failure"
-    console.error("[api/files/upload] Indexing failed", { message: safeMessage })
-    status = "failed"
-    indexingMessage = "Indexing failed."
-
-    if (documentId) {
-      await updateDocumentStatus(documentId, "failed")
-    }
+  } else {
+    ingestError = "Inline parsing for this file type is coming next."
+    status = "uploaded"
   }
 
   return NextResponse.json({
     ok: true,
     file: {
-      id: documentId || id,
+      id,
       name: sanitized,
       size: file.size,
-      type: file.type || extension.replace(".", "") || "application/octet-stream",
+      type: fileType,
       storedPath: relativeStoredPath,
       status,
-      chunkCount,
-      indexingMessage,
     },
+    ingested,
+    documentId,
+    chunkCount,
+    ...(ingested ? {} : { ingestError }),
   })
 }

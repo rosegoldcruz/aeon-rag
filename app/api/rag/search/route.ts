@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server"
-import { searchSimilarChunks } from "@/lib/rag/db"
-import { embedText } from "@/lib/rag/text"
+import { retrieveContext } from "@/lib/retrieve"
 
 type SearchRequest = {
   query?: unknown
-  limit?: unknown
+  topK?: unknown
 }
 
 export const runtime = "nodejs"
@@ -25,7 +24,7 @@ export async function POST(request: Request) {
   }
 
   const query = typeof body.query === "string" ? body.query.trim() : ""
-  const limit = typeof body.limit === "number" && Number.isFinite(body.limit) ? Math.max(1, Math.min(body.limit, 10)) : 5
+  const topK = typeof body.topK === "number" && Number.isFinite(body.topK) ? Math.max(1, Math.min(body.topK, 10)) : 5
 
   if (!query) {
     return NextResponse.json(
@@ -38,13 +37,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const queryEmbedding = await embedText(query)
-    const chunks = await searchSimilarChunks(queryEmbedding, limit)
+    const result = await retrieveContext(query, topK)
 
     return NextResponse.json({
       ok: true,
-      query,
-      chunks,
+      context: result.context,
+      sources: result.sources,
     })
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : "Unknown RAG search failure"

@@ -1,6 +1,6 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
-import { getRagStats } from "@/lib/rag/db"
+import pool from "@/lib/db"
 
 const MODELS = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
@@ -23,14 +23,18 @@ export async function GET() {
     uploadReady = false
   }
 
-  let ragStats = {
-    documents: 0,
-    indexedDocuments: 0,
-    chunks: 0,
-  }
+  let ragStats = { indexedDocuments: 0, chunks: 0 }
 
   try {
-    ragStats = await getRagStats()
+    const [indexedDocuments, chunks] = await Promise.all([
+      pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM documents WHERE status = 'indexed'"),
+      pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM chunks"),
+    ])
+
+    ragStats = {
+      indexedDocuments: Number(indexedDocuments.rows[0]?.count || "0"),
+      chunks: Number(chunks.rows[0]?.count || "0"),
+    }
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : "Unknown RAG stats error"
     console.error("[api/models] RAG status read failed", { message: safeMessage })

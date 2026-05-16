@@ -44,6 +44,8 @@ type UploadedFile = {
   status?: "uploaded" | "indexed" | "failed"
   chunkCount?: number
   indexingMessage?: string
+  ingested?: boolean
+  ingestError?: string
 }
 
 type SpeechRecognitionLike = {
@@ -448,6 +450,10 @@ export function ChatArea() {
         const payload = (await response.json()) as {
           ok?: boolean
           file?: UploadedFile
+          ingested?: boolean
+          documentId?: string
+          chunkCount?: number
+          ingestError?: string
           error?: string
         }
 
@@ -455,7 +461,16 @@ export function ChatArea() {
           throw new Error(payload.error || "Upload failed")
         }
 
-        uploaded.push(payload.file)
+        uploaded.push({
+          ...payload.file,
+          ingested: payload.ingested,
+          chunkCount: payload.chunkCount ?? payload.file.chunkCount,
+          ingestError: payload.ingestError,
+          status: payload.ingested ? "indexed" : payload.file.status,
+          indexingMessage: payload.ingested
+            ? "Indexed for retrieval"
+            : payload.ingestError || payload.file.indexingMessage,
+        })
       } catch {
         failed.push(file.name)
       }
@@ -469,6 +484,11 @@ export function ChatArea() {
       setUploadMessage(
         `${uploaded.length} file(s) processed: indexed ${indexedCount}, uploaded ${uploadedOnlyCount}, failed ${failedCount}.`,
       )
+
+      const ingestErrors = uploaded.filter((item) => item.ingested === false && item.ingestError).map((item) => item.ingestError)
+      if (ingestErrors.length > 0) {
+        setUploadMessage(`Upload succeeded, but some files were not indexed: ${ingestErrors.join(" | ")}`)
+      }
 
       try {
         const refreshResponse = await fetch("/api/models")

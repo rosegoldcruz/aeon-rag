@@ -2,8 +2,7 @@ import { generateText } from "ai"
 import { vertex } from "@ai-sdk/google-vertex"
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
-import { searchSimilarChunks } from "@/lib/rag/db"
-import { embedText } from "@/lib/rag/text"
+import { retrieveContext } from "@/lib/retrieve"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
 type ResponseStyle = "balanced" | "direct" | "detailed"
@@ -139,24 +138,19 @@ export async function POST(request: Request) {
 
   let retrievedContextBlock = ""
   let retrievedChunkCount = 0
+  let retrievedSources: Array<{ documentName: string; content: string; score?: number }> = []
 
   if (useUploadedContext) {
     try {
-      const queryEmbedding = await embedText(message)
-      const retrieved = await searchSimilarChunks(queryEmbedding, 5)
+      const retrieved = await retrieveContext(message, 5)
+      retrievedSources = retrieved.sources
 
-      if (retrieved.length > 0) {
-        retrievedChunkCount = retrieved.length
-        const formatted = retrieved
-          .map(
-            (chunk) =>
-              `[source:${chunk.documentName}#chunk-${chunk.chunkIndex}] similarity=${chunk.similarity.toFixed(4)}\n${chunk.content}`,
-          )
-          .join("\n\n")
-
+      if (retrieved.context) {
+        retrievedChunkCount = retrieved.sources.length
         retrievedContextBlock =
-          "Use this retrieved context when relevant. If you use it, cite sources inline with [source:filename#chunk-index].\n\n" +
-          formatted
+          "Relevant context from uploaded documents:\n" +
+          retrieved.context +
+          "\n\nUse this context where relevant. If the context does not answer the question, say so and answer from general reasoning. Include sources when practical."
       }
     } catch (error) {
       const safeMessage = error instanceof Error ? error.message : "Unknown retrieval failure"
@@ -223,6 +217,7 @@ export async function POST(request: Request) {
         mode,
         model: candidate,
         chatId: undefined,
+        ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
       })
     } catch (error) {
       const safeMessage = error instanceof Error ? error.message : "Unknown Vertex request failure"
