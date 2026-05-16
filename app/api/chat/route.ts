@@ -2,6 +2,8 @@ import { generateText } from "ai"
 import { vertex } from "@ai-sdk/google-vertex"
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
+import { searchSimilarChunks } from "@/lib/rag/db"
+import { embedText } from "@/lib/rag/text"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
 type ResponseStyle = "balanced" | "direct" | "detailed"
@@ -14,6 +16,7 @@ type ChatRequest = {
   options?: {
     responseStyle?: unknown
     includeExecutionSteps?: unknown
+    useUploadedContext?: unknown
   }
 }
 
@@ -95,6 +98,7 @@ export async function POST(request: Request) {
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const responseStyle = isResponseStyle(body.options?.responseStyle) ? body.options?.responseStyle : "balanced"
   const includeExecutionSteps = body.options?.includeExecutionSteps === true
+  const useUploadedContext = body.options?.useUploadedContext !== false
 
   if (!message) {
     return NextResponse.json(
@@ -130,8 +134,35 @@ export async function POST(request: Request) {
 
   const attachmentContext =
     attachments.length > 0
-      ? `User attached files metadata (retrieval not implemented yet): ${JSON.stringify(attachments)}`
+      ? `User attached files metadata: ${JSON.stringify(attachments)}`
       : ""
+
+  let retrievedContextBlock = ""
+  let retrievedChunkCount = 0
+
+  if (useUploadedContext) {
+    try {
+      const queryEmbedding = await embedText(message)
+      const retrieved = await searchSimilarChunks(queryEmbedding, 5)
+
+      if (retrieved.length > 0) {
+        retrievedChunkCount = retrieved.length
+        const formatted = retrieved
+          .map(
+            (chunk) =>
+              `[source:${chunk.documentName}#chunk-${chunk.chunkIndex}] similarity=${chunk.similarity.toFixed(4)}\n${chunk.content}`,
+          )
+          .join("\n\n")
+
+        retrievedContextBlock =
+          "Use this retrieved context when relevant. If you use it, cite sources inline with [source:filename#chunk-index].\n\n" +
+          formatted
+      }
+    } catch (error) {
+      const safeMessage = error instanceof Error ? error.message : "Unknown retrieval failure"
+      console.error("[api/chat] Retrieval step failed", { message: safeMessage })
+    }
+  }
 
   const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
   let credentialsFileExists = false
@@ -156,9 +187,18 @@ export async function POST(request: Request) {
     credentialsFileExists,
     mode,
     attachmentCount: attachments.length,
+    useUploadedContext,
+    retrievedChunkCount,
   })
 
-  const combinedSystem = [SYSTEM_PROMPT, MODE_INSTRUCTIONS[mode], styleInstruction, executionInstruction, attachmentContext]
+  const combinedSystem = [
+    SYSTEM_PROMPT,
+    MODE_INSTRUCTIONS[mode],
+    styleInstruction,
+    executionInstruction,
+    attachmentContext,
+    retrievedContextBlock,
+  ]
     .filter(Boolean)
     .join("\n\n")
 

@@ -41,6 +41,9 @@ type UploadedFile = {
   size: number
   type: string
   storedPath: string
+  status?: "uploaded" | "indexed" | "failed"
+  chunkCount?: number
+  indexingMessage?: string
 }
 
 type SpeechRecognitionLike = {
@@ -61,10 +64,11 @@ type SpeechRecognitionLike = {
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
 const MODEL_FALLBACK: ModelOption[] = [
+  { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
+  { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
   { id: "gemini-1.5-pro", label: "AEON / Gemini 1.5 Pro" },
   { id: "gemini-1.5-flash", label: "AEON / Gemini 1.5 Flash" },
   { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
-  { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
 ]
 
 const MODE_LABEL: Record<ChatMode, string> = {
@@ -108,7 +112,7 @@ export function ChatArea() {
 
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>("balanced")
   const [includeExecutionSteps, setIncludeExecutionSteps] = useState(true)
-  const [useUploadedContext] = useState(false)
+  const [useUploadedContext, setUseUploadedContext] = useState(true)
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
@@ -119,11 +123,17 @@ export function ChatArea() {
     vertexLocationConfigured: boolean
     uploadStorage: string
     ragIngestion: string
+    knowledgeRetrieval: string
+    indexedDocuments: number
+    indexedChunks: number
   }>({
     vertexProjectConfigured: false,
     vertexLocationConfigured: false,
     uploadStorage: "unknown",
     ragIngestion: "coming next",
+    knowledgeRetrieval: "not indexed yet",
+    indexedDocuments: 0,
+    indexedChunks: 0,
   })
 
   const [isListening, setIsListening] = useState(false)
@@ -158,6 +168,9 @@ export function ChatArea() {
             vertexLocationConfigured?: boolean
             uploadStorage?: string
             ragIngestion?: string
+            knowledgeRetrieval?: string
+            indexedDocuments?: number
+            indexedChunks?: number
           }
         }
 
@@ -172,6 +185,9 @@ export function ChatArea() {
             vertexLocationConfigured: Boolean(payload.status.vertexLocationConfigured),
             uploadStorage: payload.status.uploadStorage || "unknown",
             ragIngestion: payload.status.ragIngestion || "coming next",
+            knowledgeRetrieval: payload.status.knowledgeRetrieval || "not indexed yet",
+            indexedDocuments: Number(payload.status.indexedDocuments || 0),
+            indexedChunks: Number(payload.status.indexedChunks || 0),
           })
         }
       } catch {
@@ -273,6 +289,7 @@ export function ChatArea() {
           options: {
             responseStyle,
             includeExecutionSteps,
+            useUploadedContext,
           },
         }),
       })
@@ -446,7 +463,36 @@ export function ChatArea() {
 
     if (uploaded.length > 0) {
       setUploadedFiles((prev) => [...prev, ...uploaded])
-      setUploadMessage(`${uploaded.length} file(s) uploaded. Retrieval coming next.`)
+      const indexedCount = uploaded.filter((item) => item.status === "indexed").length
+      const failedCount = uploaded.filter((item) => item.status === "failed").length
+      const uploadedOnlyCount = uploaded.filter((item) => item.status === "uploaded").length
+      setUploadMessage(
+        `${uploaded.length} file(s) processed: indexed ${indexedCount}, uploaded ${uploadedOnlyCount}, failed ${failedCount}.`,
+      )
+
+      try {
+        const refreshResponse = await fetch("/api/models")
+        const refreshPayload = (await refreshResponse.json()) as {
+          status?: {
+            knowledgeRetrieval?: string
+            ragIngestion?: string
+            indexedDocuments?: number
+            indexedChunks?: number
+          }
+        }
+
+        if (refreshPayload.status) {
+          setStatusInfo((prev) => ({
+            ...prev,
+            knowledgeRetrieval: refreshPayload.status?.knowledgeRetrieval || prev.knowledgeRetrieval,
+            ragIngestion: refreshPayload.status?.ragIngestion || prev.ragIngestion,
+            indexedDocuments: Number(refreshPayload.status?.indexedDocuments || prev.indexedDocuments),
+            indexedChunks: Number(refreshPayload.status?.indexedChunks || prev.indexedChunks),
+          }))
+        }
+      } catch {
+        setUploadMessage("Files processed, but could not refresh retrieval status.")
+      }
     }
 
     if (failed.length > 0) {
@@ -762,7 +808,16 @@ export function ChatArea() {
                 {statusInfo.uploadStorage === "enabled" ? "Knowledge upload enabled" : "Ready on first upload"}
               </p>
               <p>
+                <span className="font-semibold">Knowledge retrieval:</span> {statusInfo.knowledgeRetrieval}
+              </p>
+              <p>
                 <span className="font-semibold">RAG ingestion:</span> {statusInfo.ragIngestion}
+              </p>
+              <p>
+                <span className="font-semibold">Indexed documents:</span> {statusInfo.indexedDocuments}
+              </p>
+              <p>
+                <span className="font-semibold">Indexed chunks:</span> {statusInfo.indexedChunks}
               </p>
               <p>
                 <span className="font-semibold">App version:</span> v0.1.0
@@ -904,6 +959,17 @@ export function ChatArea() {
                     <div key={file.id} className="flex items-center gap-2 rounded-full border border-border/50 px-3 py-1 text-xs">
                       <span>{file.name}</span>
                       <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 ${
+                          file.status === "indexed"
+                            ? "bg-emerald-500/15 text-emerald-300"
+                            : file.status === "failed"
+                              ? "bg-destructive/15 text-destructive"
+                              : "bg-secondary/40 text-muted-foreground"
+                        }`}
+                      >
+                        {file.status || "uploaded"}
+                      </span>
                       <button
                         type="button"
                         className="text-muted-foreground hover:text-foreground"
@@ -992,8 +1058,11 @@ export function ChatArea() {
                         >
                           Include execution steps: {includeExecutionSteps ? "on" : "off"}
                         </button>
-                        <button className="dropdown-item" disabled>
-                          Use uploaded context: {useUploadedContext ? "enabled" : "coming soon"}
+                        <button
+                          className="dropdown-item"
+                          onClick={() => setUseUploadedContext((prev) => !prev)}
+                        >
+                          Use uploaded context: {useUploadedContext ? "enabled" : "off"}
                         </button>
                         <button className="dropdown-item" onClick={clearChat}>
                           Clear current chat

@@ -3,17 +3,16 @@
 Current state:
 - Knowledge upload enabled through [app/api/files/upload/route.ts](app/api/files/upload/route.ts).
 - Uploaded files are stored in /home/aeon-rag/storage/uploads.
-- Upload metadata can be sent to [app/api/chat/route.ts](app/api/chat/route.ts) as context.
-- Retrieval and grounded answer generation are not implemented yet.
+- Supported text formats (.txt/.md/.json/.csv) are parsed, chunked, embedded, and stored in pgvector.
+- Retrieval search is available via [app/api/rag/search/route.ts](app/api/rag/search/route.ts).
+- [app/api/chat/route.ts](app/api/chat/route.ts) can inject retrieved context and request source citations.
 
 Retrieval status:
-- Retrieval coming next.
+- Phase 1 retrieval enabled after files are indexed.
 
 Planned implementation sequence:
-1. Parse uploaded docs by file type.
-2. Chunk extracted text with stable chunk IDs.
-3. Embed chunks with Vertex embeddings.
-4. Store vectors and metadata in pgvector.
-5. Retrieve top-k chunks for each request.
-6. Inject retrieved context into chat prompts.
-7. Return source citations in assistant answers.
+1. Add PDF/DOCX parsing pipeline.
+2. Add chunk attribution spans and richer citation rendering in UI.
+3. Add background indexing queue and retry jobs.
+4. Add hybrid lexical + vector retrieval.
+5. Add source confidence and chunk deduplication.

@@ -1,5 +1,6 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
+import { getRagStats } from "@/lib/rag/db"
 
 const MODELS = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
@@ -22,6 +23,21 @@ export async function GET() {
     uploadReady = false
   }
 
+  let ragStats = {
+    documents: 0,
+    indexedDocuments: 0,
+    chunks: 0,
+  }
+
+  try {
+    ragStats = await getRagStats()
+  } catch (error) {
+    const safeMessage = error instanceof Error ? error.message : "Unknown RAG stats error"
+    console.error("[api/models] RAG status read failed", { message: safeMessage })
+  }
+
+  const retrievalEnabled = ragStats.indexedDocuments > 0 && ragStats.chunks > 0
+
   return NextResponse.json({
     ok: true,
     models: MODELS,
@@ -33,7 +49,10 @@ export async function GET() {
       vertexLocation: process.env.GOOGLE_VERTEX_LOCATION ? "configured" : "not configured",
       voiceInput: "browser-dependent",
       uploadStorage: uploadReady ? "enabled" : "ready-on-first-upload",
-      ragIngestion: "coming next",
+      ragIngestion: retrievalEnabled ? "enabled" : "coming next",
+      knowledgeRetrieval: retrievalEnabled ? "enabled" : "not indexed yet",
+      indexedDocuments: ragStats.indexedDocuments,
+      indexedChunks: ragStats.chunks,
     },
   })
 }
