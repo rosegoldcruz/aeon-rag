@@ -13,6 +13,14 @@ echo " AEON OPS PUSH + DEPLOY"
 echo " Commit: $COMMIT_MESSAGE"
 echo "========================================"
 
+echo ""
+echo "PRIVATE ARTIFACT PREFLIGHT..."
+if git ls-files | grep -E '(^storage/manifests/|^storage/imports/|^storage/uploads/|\.jsonl$|\.tsv$|tsconfig\.tsbuildinfo$)' >/dev/null 2>&1; then
+  echo "Blocked: private/generated RAG artifacts are tracked by Git."
+  git ls-files | grep -E '(^storage/manifests/|^storage/imports/|^storage/uploads/|\.jsonl$|\.tsv$|tsconfig\.tsbuildinfo$)' || true
+  exit 1
+fi
+
 echo "1) Git status..."
 git status --short
 

@@ -43,12 +43,6 @@ tsconfig.tsbuildinfo
 -ef *
 -o StrictHostKeyChecking*
 
-# TypeScript incremental cache
-tsconfig.tsbuildinfo
-
-# accidental shell paste artifacts
--ef *
--o StrictHostKeyChecking*
 # AEON private/generated RAG corpus artifacts
 storage/manifests/
 storage/imports/
