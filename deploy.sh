@@ -3,6 +3,7 @@ set -euo pipefail
 
 APP_DIR="/home/aeon-rag"
 APP_NAME="aeonops"
+WATCHDOG_NAME="aeonops-watchdog"
 BRANCH="main"
 COMMIT_MESSAGE="${1:-user commit}"
 
@@ -66,6 +67,12 @@ else
   pm2 start ecosystem.config.cjs --env production
 fi
 
+if pm2 describe "$WATCHDOG_NAME" >/dev/null 2>&1; then
+  pm2 restart ecosystem.config.cjs --only "$WATCHDOG_NAME" --update-env
+else
+  pm2 start ecosystem.config.cjs --only "$WATCHDOG_NAME" --env production
+fi
+
 echo "12) Save PM2..."
 pm2 save
 
@@ -81,7 +88,14 @@ for i in {1..30}; do
   sleep 1
 done
 
+echo "14) Health check..."
+if ! curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+  echo "Health endpoint failed, running self-heal check..."
+  bash scripts/self-heal-check.sh || true
+fi
+
 curl -I http://127.0.0.1:3000 || true
+curl -I http://127.0.0.1:3000/api/health || true
 curl -I http://aeonops.com || true
 curl -I https://aeonops.com || true
 curl -I https://www.aeonops.com || true
