@@ -2,11 +2,12 @@
   "name": "AEON Ops",
   "short_name": "AEON",
   "description": "AEON Ops private workspace",
-  "start_url": "/",
+  "id": "/?v=20260517-1",
+  "start_url": "/?v=20260517-1",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#05070a",
-  "theme_color": "#05070a",
+  "background_color": "#000000",
+  "theme_color": "#000000",
   "icons": [
     {
       "src": "/android-chrome-192x192.png",
