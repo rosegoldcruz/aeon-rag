@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { extname, basename } from "node:path"
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
+import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { ingestStoredFile } from "@/lib/ingest"
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
@@ -30,6 +31,12 @@ function sanitizeFileName(name: string) {
 export const runtime = "nodejs"
 
 export async function POST(request: Request) {
+  const session = await getAuthenticatedSession()
+
+  if (!session) {
+    return unauthorizedResponse()
+  }
+
   let formData: FormData
 
   try {

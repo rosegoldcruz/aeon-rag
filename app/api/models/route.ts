@@ -1,5 +1,6 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
+import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import pool from "@/lib/db"
 
 const MODELS = [
@@ -13,6 +14,12 @@ const MODELS = [
 export const runtime = "nodejs"
 
 export async function GET() {
+  const session = await getAuthenticatedSession()
+
+  if (!session) {
+    return unauthorizedResponse()
+  }
+
   const uploadPath = "/home/aeon-rag/storage/uploads"
   let uploadReady = false
 

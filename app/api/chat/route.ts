@@ -2,6 +2,7 @@ import { generateText } from "ai"
 import { vertex } from "@ai-sdk/google-vertex"
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
+import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { retrieveContext } from "@/lib/retrieve"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
@@ -77,6 +78,12 @@ async function validateVertexConfig() {
 }
 
 export async function POST(request: Request) {
+  const session = await getAuthenticatedSession()
+
+  if (!session) {
+    return unauthorizedResponse()
+  }
+
   let body: ChatRequest
 
   try {

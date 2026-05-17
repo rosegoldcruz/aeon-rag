@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server"
 
+import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { getRagStats } from "@/lib/rag/db"
 
 export const runtime = "nodejs"
 
 export async function GET() {
+  const session = await getAuthenticatedSession()
+
+  if (!session) {
+    return unauthorizedResponse()
+  }
+
   try {
     const stats = await getRagStats()
 

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { retrieveContext } from "@/lib/retrieve"
 
 type SearchRequest = {
@@ -9,6 +10,12 @@ type SearchRequest = {
 export const runtime = "nodejs"
 
 export async function POST(request: Request) {
+  const session = await getAuthenticatedSession()
+
+  if (!session) {
+    return unauthorizedResponse()
+  }
+
   let body: SearchRequest
 
   try {
