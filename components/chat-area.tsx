@@ -9,6 +9,7 @@ import {
   FileText,
   ImageIcon,
   Lightbulb,
+  LogOut,
   Menu,
   Mic,
   Paperclip,
@@ -18,7 +19,9 @@ import {
   Upload,
   X,
 } from "lucide-react"
+import { signOut, useSession } from "next-auth/react"
 import { ParticleOrb, type OrbState } from "@/components/particle-orb"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/components/ui/use-mobile"
 
@@ -146,8 +149,26 @@ function stripPreview(input: string | null | undefined) {
   return input.replace(/\s+/g, " ").trim()
 }
 
+function getInitials(input: string) {
+  const parts = input
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (parts.length === 0) {
+    return "AO"
+  }
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase()
+  }
+
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
+}
+
 export function ChatArea() {
   const isMobile = useIsMobile()
+  const { data: session } = useSession()
   const waveBarCount = isMobile ? 24 : 52
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -242,6 +263,11 @@ export function ChatArea() {
   const selectedModelLabel = useMemo(() => {
     return models.find((item) => item.id === selectedModel)?.label || selectedModel
   }, [models, selectedModel])
+
+  const profileName = session?.user?.name?.trim() || "ZITADEL User"
+  const profileEmail = session?.user?.email?.trim() || "Authenticated session"
+  const profileImage = session?.user?.image || ""
+  const profileInitials = getInitials(profileName)
 
   const sidebarIsCollapsed = !isMobile && sidebarCollapsed
 
@@ -1132,12 +1158,56 @@ export function ChatArea() {
           </div>
         </div>
 
-        {!sidebarIsCollapsed && (
+        {sidebarIsCollapsed ? (
+          <div className="border-t border-border/40 p-3">
+            <div className="flex flex-col items-center gap-2">
+              <Avatar className="h-9 w-9">
+                {profileImage ? <AvatarImage src={profileImage} alt={profileName} /> : null}
+                <AvatarFallback>{profileInitials}</AvatarFallback>
+              </Avatar>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={() => {
+                  void signOut({ callbackUrl: "/login" })
+                }}
+                aria-label="Sign out"
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        ) : (
           <div className="border-t border-border/40 p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">RAG Status</p>
             <p className="mt-1">Indexed docs: {ragStatus.indexedDocuments}</p>
             <p>Chunks: {ragStatus.chunks}</p>
             <p>Total docs: {ragStatus.documents}</p>
+
+            <div className="mt-3 rounded-lg border border-border/40 bg-background/40 p-2.5">
+              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">ZITADEL Profile</p>
+              <div className="mt-2 flex items-start gap-2">
+                <Avatar className="h-9 w-9">
+                  {profileImage ? <AvatarImage src={profileImage} alt={profileName} /> : null}
+                  <AvatarFallback>{profileInitials}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{profileName}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{profileEmail}</p>
+                </div>
+              </div>
+              <Button
+                variant="secondary"
+                className="mt-2 h-8 w-full justify-start gap-2 text-xs"
+                onClick={() => {
+                  void signOut({ callbackUrl: "/login" })
+                }}
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Log Out
+              </Button>
+            </div>
           </div>
         )}
       </div>
