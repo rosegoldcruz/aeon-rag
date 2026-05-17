@@ -1,2 +1,0 @@
-storage/manifests/*.jsonl filter=lfs diff=lfs merge=lfs -text
-storage/manifests/*.tsv filter=lfs diff=lfs merge=lfs -text

@@ -4,19 +4,22 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowUp,
   Check,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   ImageIcon,
   Lightbulb,
   Menu,
   Mic,
   Paperclip,
+  Search,
   Settings,
+  Trash2,
   Upload,
   X,
 } from "lucide-react"
+import { ParticleOrb, type OrbState } from "@/components/particle-orb"
 import { Button } from "@/components/ui/button"
-import { ParticleOrb } from "@/components/particle-orb"
 import { useIsMobile } from "@/components/ui/use-mobile"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
@@ -24,10 +27,20 @@ type ResponseStyle = "balanced" | "direct" | "detailed"
 
 type ChatMessage = {
   id: string
-  role: "user" | "assistant"
+  role: "user" | "assistant" | "system"
   text: string
   mode: ChatMode
   timestamp: string
+  model?: string
+  sources?: Array<{ documentName: string; content: string; score?: number }>
+}
+
+type ChatSession = {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  lastMessagePreview?: string | null
 }
 
 type ModelOption = {
@@ -65,11 +78,14 @@ type SpeechRecognitionLike = {
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike
 
+type FailedSubmission = {
+  mode: ChatMode
+  text: string
+}
+
 const MODEL_FALLBACK: ModelOption[] = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
   { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
-  { id: "gemini-1.5-pro", label: "AEON / Gemini 1.5 Pro" },
-  { id: "gemini-1.5-flash", label: "AEON / Gemini 1.5 Flash" },
   { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
 ]
 
@@ -77,7 +93,7 @@ const MODE_LABEL: Record<ChatMode, string> = {
   chat: "Chat",
   brainstorm: "Brainstorm",
   plan: "Plan",
-  image_prompt: "Image prompt",
+  image_prompt: "Image Prompt",
 }
 
 function makeId() {
@@ -94,23 +110,59 @@ function formatBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function formatRelativeTime(iso: string) {
+  const date = new Date(iso)
+  const now = Date.now()
+  const diff = date.getTime() - now
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+
+  const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" })
+
+  if (Math.abs(diff) < hour) {
+    return rtf.format(Math.round(diff / minute), "minute")
+  }
+
+  if (Math.abs(diff) < day) {
+    return rtf.format(Math.round(diff / hour), "hour")
+  }
+
+  return rtf.format(Math.round(diff / day), "day")
+}
+
+function stripPreview(input: string | null | undefined) {
+  if (!input) {
+    return ""
+  }
+
+  return input.replace(/\s+/g, " ").trim()
+}
+
 export function ChatArea() {
   const isMobile = useIsMobile()
-  const waveBarCount = isMobile ? 28 : 60
+  const waveBarCount = isMobile ? 24 : 52
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
+  const [sessionSearch, setSessionSearch] = useState("")
+
   const [inputMessage, setInputMessage] = useState("")
   const [activeMode, setActiveMode] = useState<ChatMode>("chat")
   const [isLoading, setIsLoading] = useState(false)
   const [uiMessage, setUiMessage] = useState("")
+  const [lastFailedSubmission, setLastFailedSubmission] = useState<FailedSubmission | null>(null)
 
   const [models, setModels] = useState<ModelOption[]>(MODEL_FALLBACK)
   const [selectedModel, setSelectedModel] = useState(MODEL_FALLBACK[0].id)
-  const [modelDropdownOpen, setModelDropdownOpen] = useState(false)
+
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false)
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
 
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>("balanced")
   const [includeExecutionSteps, setIncludeExecutionSteps] = useState(true)
@@ -120,27 +172,16 @@ export function ChatArea() {
   const [isUploading, setIsUploading] = useState(false)
   const [uploadMessage, setUploadMessage] = useState("")
 
-  const [statusInfo, setStatusInfo] = useState<{
-    vertexProjectConfigured: boolean
-    vertexLocationConfigured: boolean
-    uploadStorage: string
-    ragIngestion: string
-    knowledgeRetrieval: string
-    indexedDocuments: number
-    indexedChunks: number
-  }>({
-    vertexProjectConfigured: false,
-    vertexLocationConfigured: false,
-    uploadStorage: "unknown",
-    ragIngestion: "coming next",
-    knowledgeRetrieval: "not indexed yet",
+  const [ragStatus, setRagStatus] = useState({
+    documents: 0,
     indexedDocuments: 0,
-    indexedChunks: 0,
+    chunks: 0,
   })
 
   const [isListening, setIsListening] = useState(false)
   const [isRequestingMic, setIsRequestingMic] = useState(false)
   const [voiceMessage, setVoiceMessage] = useState("")
+  const [orbState, setOrbState] = useState<OrbState>("idle")
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const finalTranscriptRef = useRef("")
@@ -148,56 +189,171 @@ export function ChatArea() {
   const heardSpeechRef = useRef(false)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const modelMenuRef = useRef<HTMLDivElement | null>(null)
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const optionsMenuRef = useRef<HTMLDivElement | null>(null)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
-  const headerRef = useRef<HTMLElement | null>(null)
 
   const selectedModelLabel = useMemo(() => {
     return models.find((item) => item.id === selectedModel)?.label || selectedModel
   }, [models, selectedModel])
 
+  const visibleSessions = useMemo(() => {
+    const needle = sessionSearch.trim().toLowerCase()
+    if (!needle) {
+      return sessions
+    }
+
+    return sessions.filter((item) => {
+      const title = item.title.toLowerCase()
+      const preview = stripPreview(item.lastMessagePreview).toLowerCase()
+      return title.includes(needle) || preview.includes(needle)
+    })
+  }, [sessionSearch, sessions])
+
+  const currentOrbState: OrbState = isListening ? "listening" : orbState
+
+  const refreshRagStatus = async () => {
+    try {
+      const response = await fetch("/api/rag/status", { cache: "no-store" })
+      const payload = (await response.json()) as {
+        ok?: boolean
+        documents?: number
+        indexedDocuments?: number
+        chunks?: number
+      }
+
+      if (!response.ok || !payload.ok) {
+        return
+      }
+
+      setRagStatus({
+        documents: Number(payload.documents || 0),
+        indexedDocuments: Number(payload.indexedDocuments || 0),
+        chunks: Number(payload.chunks || 0),
+      })
+    } catch {
+      // Keep current status values.
+    }
+  }
+
+  const refreshModels = async () => {
+    try {
+      const response = await fetch("/api/models", { cache: "no-store" })
+      const payload = (await response.json()) as {
+        ok?: boolean
+        models?: ModelOption[]
+        selected?: string
+      }
+
+      if (response.ok && payload.ok && Array.isArray(payload.models) && payload.models.length > 0) {
+        setModels(payload.models)
+        setSelectedModel(payload.selected || payload.models[0].id)
+      }
+    } catch {
+      setUiMessage("Could not load model metadata. Using defaults.")
+    }
+  }
+
+  const refreshSessions = async (preferredSessionId?: string | null) => {
+    const response = await fetch("/api/chats", { cache: "no-store" })
+    const payload = (await response.json()) as {
+      ok?: boolean
+      sessions?: ChatSession[]
+      error?: string
+    }
+
+    if (!response.ok || !payload.ok || !Array.isArray(payload.sessions)) {
+      throw new Error(payload.error || "Could not load chats.")
+    }
+
+    setSessions(payload.sessions)
+
+    const nextActive = preferredSessionId || activeSessionId || payload.sessions[0]?.id || null
+    setActiveSessionId(nextActive)
+    return payload.sessions
+  }
+
+  const loadSessionMessages = async (sessionId: string) => {
+    const response = await fetch(`/api/chats/${sessionId}`, { cache: "no-store" })
+    const payload = (await response.json()) as {
+      ok?: boolean
+      messages?: Array<{
+        id: string
+        role: "user" | "assistant" | "system"
+        content: string
+        model?: string
+        sources?: Array<{ documentName: string; content: string; score?: number }>
+        createdAt: string
+      }>
+      error?: string
+    }
+
+    if (!response.ok || !payload.ok || !Array.isArray(payload.messages)) {
+      throw new Error(payload.error || "Could not load messages for this chat.")
+    }
+
+    setMessages(
+      payload.messages.map((item) => ({
+        id: item.id,
+        role: item.role,
+        text: item.content,
+        mode: "chat",
+        timestamp: item.createdAt,
+        model: item.model,
+        sources: item.sources,
+      })),
+    )
+  }
+
+  const createNewChat = async () => {
+    if (isLoading) {
+      return
+    }
+
+    setUiMessage("")
+    setMessages([])
+    setLastFailedSubmission(null)
+    setActiveMode("chat")
+    setOrbState("idle")
+
+    const response = await fetch("/api/chats", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ title: "New Chat" }),
+    })
+
+    const payload = (await response.json()) as {
+      ok?: boolean
+      session?: ChatSession
+      error?: string
+    }
+
+    if (!response.ok || !payload.ok || !payload.session) {
+      throw new Error(payload.error || "Could not create a new chat session.")
+    }
+
+    setActiveSessionId(payload.session.id)
+    setSessions((prev) => [payload.session!, ...prev])
+    setMobileSidebarOpen(false)
+  }
+
   useEffect(() => {
-    const fetchModels = async () => {
+    const bootstrap = async () => {
       try {
-        const response = await fetch("/api/models")
-        const payload = (await response.json()) as {
-          ok?: boolean
-          models?: ModelOption[]
-          selected?: string
-          status?: {
-            vertexProjectConfigured?: boolean
-            vertexLocationConfigured?: boolean
-            uploadStorage?: string
-            ragIngestion?: string
-            knowledgeRetrieval?: string
-            indexedDocuments?: number
-            indexedChunks?: number
-          }
+        await Promise.all([refreshModels(), refreshRagStatus()])
+        const loadedSessions = await refreshSessions(null)
+        if (loadedSessions[0]?.id) {
+          await loadSessionMessages(loadedSessions[0].id)
         }
-
-        if (response.ok && payload.ok && Array.isArray(payload.models) && payload.models.length > 0) {
-          setModels(payload.models)
-          setSelectedModel(payload.selected || payload.models[0].id)
-        }
-
-        if (payload.status) {
-          setStatusInfo({
-            vertexProjectConfigured: Boolean(payload.status.vertexProjectConfigured),
-            vertexLocationConfigured: Boolean(payload.status.vertexLocationConfigured),
-            uploadStorage: payload.status.uploadStorage || "unknown",
-            ragIngestion: payload.status.ragIngestion || "coming next",
-            knowledgeRetrieval: payload.status.knowledgeRetrieval || "not indexed yet",
-            indexedDocuments: Number(payload.status.indexedDocuments || 0),
-            indexedChunks: Number(payload.status.indexedChunks || 0),
-          })
-        }
-      } catch {
-        setUiMessage("Could not load model metadata. Using defaults.")
+      } catch (error) {
+        const safe = error instanceof Error ? error.message : "Could not initialize chat workspace."
+        setUiMessage(safe)
       }
     }
 
-    void fetchModels()
+    void bootstrap()
   }, [])
 
   useEffect(() => {
@@ -208,12 +364,8 @@ export function ChatArea() {
   }, [])
 
   useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
+    const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node
-
-      if (modelMenuRef.current && !modelMenuRef.current.contains(target)) {
-        setModelDropdownOpen(false)
-      }
 
       if (optionsMenuRef.current && !optionsMenuRef.current.contains(target)) {
         setOptionsMenuOpen(false)
@@ -222,104 +374,50 @@ export function ChatArea() {
       if (exportMenuRef.current && !exportMenuRef.current.contains(target)) {
         setExportDropdownOpen(false)
       }
-
-      if (mobileMenuOpen && headerRef.current && !headerRef.current.contains(target)) {
-        setMobileMenuOpen(false)
-      }
     }
 
-    const handleEscape = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
 
-      setModelDropdownOpen(false)
+      setMobileSidebarOpen(false)
       setOptionsMenuOpen(false)
       setExportDropdownOpen(false)
-      setMobileMenuOpen(false)
       setSettingsOpen(false)
     }
 
-    document.addEventListener("mousedown", handlePointerDown)
-    document.addEventListener("keydown", handleEscape)
+    document.addEventListener("mousedown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
     return () => {
-      document.removeEventListener("mousedown", handlePointerDown)
-      document.removeEventListener("keydown", handleEscape)
+      document.removeEventListener("mousedown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
     }
-  }, [mobileMenuOpen])
+  }, [])
 
-  const addMessage = (message: Omit<ChatMessage, "id" | "timestamp">) => {
-    setMessages((prev) => [
-      ...prev,
-      {
-        ...message,
-        id: makeId(),
-        timestamp: new Date().toISOString(),
-      },
-    ])
-  }
-
-  const callChat = async (mode: ChatMode, text: string) => {
-    const trimmed = text.trim()
-    if (!trimmed || isLoading) {
-      if (!trimmed) {
-        setUiMessage("Type a message before sending.")
-      }
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([])
       return
     }
 
-    setUiMessage("")
-    setActiveMode(mode)
-    addMessage({ role: "user", text: trimmed, mode })
-    setIsLoading(true)
+    let cancelled = false
 
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message: trimmed,
-          mode,
-          model: selectedModel,
-          attachments: uploadedFiles.map((file) => ({
-            id: file.id,
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            storedPath: file.storedPath,
-          })),
-          options: {
-            responseStyle,
-            includeExecutionSteps,
-            useUploadedContext,
-          },
-        }),
-      })
-
-      const payload = (await response.json()) as {
-        ok?: boolean
-        message?: string
-        error?: string
+    const run = async () => {
+      try {
+        await loadSessionMessages(activeSessionId)
+      } catch (error) {
+        if (!cancelled) {
+          const safe = error instanceof Error ? error.message : "Could not load selected chat."
+          setUiMessage(safe)
+        }
       }
-
-      if (!response.ok || !payload.ok || !payload.message) {
-        throw new Error(payload.error || "Request failed.")
-      }
-
-      const assistantText =
-        mode === "image_prompt" && !payload.message.trim().toLowerCase().startsWith("image prompt:")
-          ? `Image prompt:\n${payload.message}`
-          : payload.message
-
-      addMessage({ role: "assistant", text: assistantText, mode })
-      setInputMessage("")
-    } catch (error) {
-      const safe = error instanceof Error ? error.message : "Chat request failed."
-      setUiMessage(safe)
-    } finally {
-      setIsLoading(false)
     }
-  }
+
+    void run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [activeSessionId])
 
   const stopListening = (discardTranscript: boolean) => {
     if (discardTranscript) {
@@ -429,7 +527,7 @@ export function ChatArea() {
   }
 
   const uploadSelectedFiles = async (files: File[]) => {
-    if (files.length === 0) return
+    if (files.length === 0 || isUploading) return
 
     setIsUploading(true)
     setUploadMessage("")
@@ -451,7 +549,6 @@ export function ChatArea() {
           ok?: boolean
           file?: UploadedFile
           ingested?: boolean
-          documentId?: string
           chunkCount?: number
           ingestError?: string
           error?: string
@@ -467,9 +564,7 @@ export function ChatArea() {
           chunkCount: payload.chunkCount ?? payload.file.chunkCount,
           ingestError: payload.ingestError,
           status: payload.ingested ? "indexed" : payload.file.status,
-          indexingMessage: payload.ingested
-            ? "Indexed for retrieval"
-            : payload.ingestError || payload.file.indexingMessage,
+          indexingMessage: payload.ingested ? "Indexed for retrieval" : payload.ingestError || payload.file.indexingMessage,
         })
       } catch {
         failed.push(file.name)
@@ -484,35 +579,7 @@ export function ChatArea() {
       setUploadMessage(
         `${uploaded.length} file(s) processed: indexed ${indexedCount}, uploaded ${uploadedOnlyCount}, failed ${failedCount}.`,
       )
-
-      const ingestErrors = uploaded.filter((item) => item.ingested === false && item.ingestError).map((item) => item.ingestError)
-      if (ingestErrors.length > 0) {
-        setUploadMessage(`Upload succeeded, but some files were not indexed: ${ingestErrors.join(" | ")}`)
-      }
-
-      try {
-        const refreshResponse = await fetch("/api/models")
-        const refreshPayload = (await refreshResponse.json()) as {
-          status?: {
-            knowledgeRetrieval?: string
-            ragIngestion?: string
-            indexedDocuments?: number
-            indexedChunks?: number
-          }
-        }
-
-        if (refreshPayload.status) {
-          setStatusInfo((prev) => ({
-            ...prev,
-            knowledgeRetrieval: refreshPayload.status?.knowledgeRetrieval || prev.knowledgeRetrieval,
-            ragIngestion: refreshPayload.status?.ragIngestion || prev.ragIngestion,
-            indexedDocuments: Number(refreshPayload.status?.indexedDocuments || prev.indexedDocuments),
-            indexedChunks: Number(refreshPayload.status?.indexedChunks || prev.indexedChunks),
-          }))
-        }
-      } catch {
-        setUploadMessage("Files processed, but could not refresh retrieval status.")
-      }
+      await refreshRagStatus()
     }
 
     if (failed.length > 0) {
@@ -528,73 +595,181 @@ export function ChatArea() {
     event.target.value = ""
   }
 
-  const handleSend = async () => {
-    await callChat("chat", inputMessage)
-  }
-
-  const handleBrainstorm = async () => {
-    setActiveMode("brainstorm")
-    if (!inputMessage.trim()) {
-      setUiMessage("What do you want to brainstorm?")
+  const submitChat = async (mode: ChatMode, rawText?: string) => {
+    if (isLoading) {
       return
     }
 
-    await callChat("brainstorm", inputMessage)
-  }
-
-  const handlePlan = async () => {
-    setActiveMode("plan")
-    if (!inputMessage.trim()) {
-      setUiMessage("What do you want a plan for?")
+    const submittedText = (rawText ?? inputMessage).trim()
+    if (!submittedText) {
+      setUiMessage("Type a message before sending.")
       return
     }
 
-    await callChat("plan", inputMessage)
+    setUiMessage("")
+    setLastFailedSubmission(null)
+    setActiveMode(mode)
+    setInputMessage("")
+    setOrbState("thinking")
+
+    let sessionId = activeSessionId
+
+    if (!sessionId) {
+      try {
+        const response = await fetch("/api/chats", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ title: "New Chat" }),
+        })
+
+        const payload = (await response.json()) as {
+          ok?: boolean
+          session?: ChatSession
+          error?: string
+        }
+
+        if (!response.ok || !payload.ok || !payload.session) {
+          throw new Error(payload.error || "Could not create chat session.")
+        }
+
+        sessionId = payload.session.id
+        setActiveSessionId(payload.session.id)
+        setSessions((prev) => [payload.session!, ...prev])
+      } catch (error) {
+        const safe = error instanceof Error ? error.message : "Could not create chat session."
+        setUiMessage(safe)
+        setInputMessage(submittedText)
+        setOrbState("error")
+        return
+      }
+    }
+
+    const optimisticUserMessage: ChatMessage = {
+      id: makeId(),
+      role: "user",
+      text: submittedText,
+      mode,
+      timestamp: new Date().toISOString(),
+      model: selectedModel,
+    }
+
+    setMessages((prev) => [...prev, optimisticUserMessage])
+    setIsLoading(true)
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: submittedText,
+          mode,
+          model: selectedModel,
+          sessionId,
+          attachments: uploadedFiles.map((file) => ({
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            storedPath: file.storedPath,
+          })),
+          options: {
+            responseStyle,
+            includeExecutionSteps,
+            useUploadedContext,
+          },
+        }),
+      })
+
+      const payload = (await response.json()) as {
+        ok?: boolean
+        message?: string
+        error?: string
+        model?: string
+        sessionId?: string
+        sources?: Array<{ documentName: string; content: string; score?: number }>
+      }
+
+      if (!response.ok || !payload.ok || !payload.message) {
+        throw new Error(payload.error || "Request failed.")
+      }
+
+      const assistantText =
+        mode === "image_prompt" && !payload.message.trim().toLowerCase().startsWith("image prompt:")
+          ? `Image prompt:\n${payload.message}`
+          : payload.message
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: makeId(),
+          role: "assistant",
+          text: assistantText,
+          mode,
+          timestamp: new Date().toISOString(),
+          model: payload.model || selectedModel,
+          sources: payload.sources,
+        },
+      ])
+
+      const nextSessionId = payload.sessionId || sessionId
+      if (nextSessionId) {
+        setActiveSessionId(nextSessionId)
+      }
+
+      await refreshSessions(nextSessionId)
+
+      if (payload.sources && payload.sources.length > 0) {
+        setOrbState("retrieving")
+        window.setTimeout(() => setOrbState("idle"), 900)
+      } else {
+        setOrbState("idle")
+      }
+    } catch (error) {
+      const safe = error instanceof Error ? error.message : "Chat request failed."
+      setUiMessage(`${safe} Retry when ready.`)
+      setLastFailedSubmission({ mode, text: submittedText })
+      setInputMessage(submittedText)
+      setOrbState("error")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  const handleCreateImage = async () => {
-    setActiveMode("image_prompt")
-    if (!inputMessage.trim()) {
-      setInputMessage("Create an image of ")
-      setUiMessage("Add your concept and send, or tap Create Image again to generate a prompt.")
+  const handleQuickAction = async (mode: ChatMode) => {
+    setActiveMode(mode)
+
+    const trimmed = inputMessage.trim()
+
+    if (!trimmed) {
+      if (mode === "image_prompt") {
+        setInputMessage("Create an image prompt for...")
+      } else if (mode === "brainstorm") {
+        setInputMessage("Brainstorm ideas for...")
+      } else if (mode === "plan") {
+        setInputMessage("Make a plan for...")
+      }
+
+      composerInputRef.current?.focus()
+      setUiMessage("Prompt starter inserted. Edit it and send.")
       return
     }
 
-    await callChat("image_prompt", inputMessage)
+    await submitChat(mode, inputMessage)
   }
 
   const removeAttachment = (id: string) => {
     setUploadedFiles((prev) => prev.filter((item) => item.id !== id))
   }
 
-  const clearChat = () => {
-    setMessages([])
-    setUiMessage("Current chat cleared.")
-    setOptionsMenuOpen(false)
-    setMobileMenuOpen(false)
-  }
-
-  const copyLastResponse = async () => {
-    const lastAssistant = [...messages].reverse().find((item) => item.role === "assistant")
-    if (!lastAssistant) {
-      setUiMessage("No assistant response available yet.")
-      return
-    }
-
-    try {
-      await navigator.clipboard.writeText(lastAssistant.text)
-      setUiMessage("Last response copied.")
-      setOptionsMenuOpen(false)
-    } catch {
-      setUiMessage("Clipboard copy failed in this browser.")
-    }
-  }
-
   const buildMarkdownExport = () => {
     const lines = ["# AEON Ops Chat Export", "", `Generated: ${new Date().toISOString()}`, ""]
 
     for (const item of messages) {
-      lines.push(`## ${item.role === "user" ? "User" : "Assistant"} (${MODE_LABEL[item.mode]})`)
+      lines.push(`## ${item.role === "user" ? "User" : item.role === "assistant" ? "Assistant" : "System"} (${MODE_LABEL[item.mode]})`)
       lines.push(item.text)
       lines.push("")
     }
@@ -604,7 +779,7 @@ export function ChatArea() {
 
   const buildShareText = () => {
     return messages
-      .map((item) => `${item.role === "user" ? "User" : "Assistant"} [${MODE_LABEL[item.mode]}]:\n${item.text}`)
+      .map((item) => `${item.role === "user" ? "User" : item.role === "assistant" ? "Assistant" : "System"} [${MODE_LABEL[item.mode]}]:\n${item.text}`)
       .join("\n\n")
   }
 
@@ -653,144 +828,474 @@ export function ChatArea() {
     }
   }
 
-  return (
-    <main className="relative flex min-h-[100dvh] flex-1 flex-col overflow-hidden overflow-x-hidden">
-      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-950 to-black" />
+  const deleteSession = async (sessionId: string) => {
+    try {
+      const response = await fetch(`/api/chats/${sessionId}`, {
+        method: "DELETE",
+      })
 
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="shader-orb shader-orb-1" />
-        <div className="shader-orb shader-orb-2" />
-        <div className="shader-orb shader-orb-3" />
-      </div>
+      const payload = (await response.json()) as { ok?: boolean; error?: string }
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Could not delete chat.")
+      }
 
-      <div className="absolute inset-0 opacity-[0.15] grid-background" />
+      const remaining = sessions.filter((session) => session.id !== sessionId)
+      setSessions(remaining)
 
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.03] mix-blend-soft-light"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`,
-        }}
-      />
+      if (activeSessionId === sessionId) {
+        const next = remaining[0]?.id || null
+        setActiveSessionId(next)
+        if (!next) {
+          setMessages([])
+        }
+      }
+    } catch (error) {
+      const safe = error instanceof Error ? error.message : "Could not delete chat."
+      setUiMessage(safe)
+    }
+  }
 
-      <header
-        ref={headerRef}
-        className="relative z-20 flex items-center justify-between gap-2 border-b border-border/50 bg-background/30 px-3 py-3 backdrop-blur-sm sm:px-6 sm:py-4"
-      >
-        <div ref={modelMenuRef} className="relative">
+  const sidebarPanel = (
+    <aside
+      className={`h-full border-r border-border/40 bg-background/80 backdrop-blur-sm transition-all duration-200 ${
+        sidebarCollapsed ? "w-[84px]" : "w-[300px]"
+      }`}
+    >
+      <div className="flex h-full flex-col">
+        <div className="border-b border-border/40 p-3">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">AEON Ops</p>
+              {!sidebarCollapsed && <p className="text-xs text-muted-foreground">Private Agent Workspace</p>}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              onClick={() => setSidebarCollapsed((prev) => !prev)}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            </Button>
+          </div>
+
           <Button
-            className="btn-3d btn-glow h-11 max-w-[58vw] gap-2 truncate bg-gradient-to-br from-secondary/90 to-secondary/70 text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-            onClick={() => setModelDropdownOpen((prev) => !prev)}
+            className="h-10 w-full justify-start gap-2"
+            onClick={() => {
+              void createNewChat().catch((error) => {
+                const safe = error instanceof Error ? error.message : "Could not create chat."
+                setUiMessage(safe)
+              })
+            }}
           >
-            <span className="truncate">{selectedModelLabel}</span>
-            <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${modelDropdownOpen ? "rotate-180" : ""}`} />
+            <FileText className="h-4 w-4" />
+            {!sidebarCollapsed && "New Chat"}
           </Button>
 
-          {modelDropdownOpen && (
-            <div className="dropdown-menu">
-              {models.map((model) => (
-                <button
-                  key={model.id}
-                  className="dropdown-item"
-                  onClick={() => {
-                    setSelectedModel(model.id)
-                    setModelDropdownOpen(false)
-                  }}
-                >
-                  {model.label}
-                </button>
-              ))}
+          {!sidebarCollapsed && (
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 px-2 py-1.5">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                value={sessionSearch}
+                onChange={(event) => setSessionSearch(event.target.value)}
+                placeholder="Search chats"
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+              />
             </div>
           )}
         </div>
 
-        <div className="hidden items-center gap-2 md:flex">
-          <Button
-            className="btn-3d btn-glow h-11 gap-2 bg-gradient-to-br from-secondary/90 to-secondary/70 text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="h-4 w-4" />
-            Configuration
-          </Button>
-
-          <div ref={exportMenuRef} className="relative">
-            <Button
-              className="btn-3d btn-glow h-11 gap-2 bg-gradient-to-br from-secondary/90 to-secondary/70 text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-              onClick={() => setExportDropdownOpen((prev) => !prev)}
-            >
-              <Upload className="h-4 w-4" />
-              Export
-            </Button>
-
-            {exportDropdownOpen && (
-              <div className="dropdown-menu right-0">
-                <button className="dropdown-item" onClick={exportMarkdown}>
-                  Export as Markdown
-                </button>
-                <button className="dropdown-item" onClick={exportJson}>
-                  Export as JSON
-                </button>
-                <button className="dropdown-item" onClick={copyShareableText}>
-                  Copy shareable text
-                </button>
+        <div className="flex-1 overflow-y-auto p-2">
+          <div className="space-y-1">
+            {visibleSessions.length === 0 && !sidebarCollapsed ? (
+              <div className="rounded-md border border-dashed border-border/50 p-3 text-xs text-muted-foreground">
+                No chats yet. Start with New Chat.
               </div>
+            ) : (
+              visibleSessions.map((session) => {
+                const isActive = session.id === activeSessionId
+                return (
+                  <div
+                    key={session.id}
+                    className={`group rounded-lg border p-2 transition ${
+                      isActive ? "border-primary/50 bg-primary/10" : "border-border/40 hover:border-border/70 hover:bg-secondary/30"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      className="w-full text-left"
+                      onClick={() => {
+                        setActiveSessionId(session.id)
+                        setMobileSidebarOpen(false)
+                      }}
+                    >
+                      <p className={`truncate text-sm ${isActive ? "font-semibold" : "font-medium"}`}>
+                        {sidebarCollapsed ? "Chat" : session.title}
+                      </p>
+                      {!sidebarCollapsed && (
+                        <>
+                          <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+                            {stripPreview(session.lastMessagePreview) || "No messages yet"}
+                          </p>
+                          <p className="mt-1 text-[11px] text-muted-foreground">{formatRelativeTime(session.updatedAt)}</p>
+                        </>
+                      )}
+                    </button>
+                    {!sidebarCollapsed && (
+                      <div className="mt-2 flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 opacity-0 group-hover:opacity-100"
+                          onClick={() => {
+                            void deleteSession(session.id)
+                          }}
+                          aria-label="Delete chat"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             )}
           </div>
         </div>
 
-        <Button
-          variant="secondary"
-          size="icon"
-          className="btn-3d h-11 w-11 md:hidden"
-          onClick={() => setMobileMenuOpen((prev) => !prev)}
-          aria-label="Toggle mobile menu"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
-      </header>
+        {!sidebarCollapsed && (
+          <div className="border-t border-border/40 p-3 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">RAG Status</p>
+            <p className="mt-1">Indexed docs: {ragStatus.indexedDocuments}</p>
+            <p>Chunks: {ragStatus.chunks}</p>
+            <p>Total docs: {ragStatus.documents}</p>
+          </div>
+        )}
+      </div>
+    </aside>
+  )
 
-      {mobileMenuOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileMenuOpen(false)} />
-          <aside className="absolute right-0 top-0 h-full w-72 border-l border-border/40 bg-background p-4 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-base font-semibold">AEON Ops</h2>
-              <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setMobileMenuOpen(false)}>
-                <X className="h-4 w-4" />
+  return (
+    <main className="relative flex min-h-[100dvh] w-full overflow-hidden">
+      <div className="absolute inset-0 bg-gradient-to-br from-black via-gray-950 to-black" />
+      <div className="absolute inset-0 opacity-[0.15] grid-background" />
+
+      <div className="relative z-10 flex w-full">
+        <div className="hidden md:block">{sidebarPanel}</div>
+
+        <section className="flex min-h-[100dvh] flex-1 flex-col overflow-hidden">
+          <header className="flex items-center justify-between gap-2 border-b border-border/50 bg-background/30 px-3 py-3 backdrop-blur-sm sm:px-6 sm:py-4">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="icon"
+                className="h-10 w-10 md:hidden"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open chat sidebar"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <p className="text-sm text-muted-foreground">AEON Control Surface</p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button className="h-10 gap-2" onClick={() => setSettingsOpen(true)}>
+                <Settings className="h-4 w-4" />
+                Configuration
+              </Button>
+
+              <div ref={exportMenuRef} className="relative">
+                <Button className="h-10 gap-2" onClick={() => setExportDropdownOpen((prev) => !prev)}>
+                  <Upload className="h-4 w-4" />
+                  Export
+                </Button>
+
+                {exportDropdownOpen && (
+                  <div className="dropdown-menu right-0">
+                    <button className="dropdown-item" onClick={exportMarkdown}>
+                      Export as Markdown
+                    </button>
+                    <button className="dropdown-item" onClick={exportJson}>
+                      Export as JSON
+                    </button>
+                    <button className="dropdown-item" onClick={() => void copyShareableText()}>
+                      Copy shareable text
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </header>
+
+          <div className="flex flex-1 flex-col overflow-hidden px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:px-6 sm:pb-6 sm:pt-6">
+            <div className="relative mb-4 mt-1 w-full overflow-visible sm:mb-6 sm:mt-2">
+              <ParticleOrb state={currentOrbState} />
+            </div>
+
+            <h1 className="mb-4 text-center font-[var(--font-heading)] text-2xl font-semibold tracking-tight text-foreground sm:mb-6 sm:text-4xl">
+              AEON Ops Private Workspace
+            </h1>
+
+            <div className="mb-5 grid w-full max-w-4xl grid-cols-1 gap-2 self-center sm:grid-cols-3 sm:gap-3">
+              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("image_prompt")}>
+                <ImageIcon className="h-4 w-4" />
+                Visualize
+              </Button>
+              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("brainstorm")}>
+                <Lightbulb className="h-4 w-4" />
+                Explore Angles
+              </Button>
+              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("plan")}>
+                <FileText className="h-4 w-4" />
+                Execution Plan
               </Button>
             </div>
 
-            <div className="space-y-2">
-              <Button variant="ghost" className="h-11 w-full justify-start" onClick={clearChat}>
-                New chat
-              </Button>
-              <div className="rounded-md border border-border/40 px-3 py-2 text-sm text-muted-foreground">
-                Chat history coming next.
-              </div>
-              <Button
-                variant="ghost"
-                className="h-11 w-full justify-start"
-                onClick={() => {
-                  setSettingsOpen(true)
-                  setMobileMenuOpen(false)
-                }}
-              >
-                Settings
-              </Button>
-              <Button
-                variant="ghost"
-                className="h-11 w-full justify-start"
-                onClick={() => {
-                  setExportDropdownOpen(true)
-                  setMobileMenuOpen(false)
-                }}
-              >
-                Export
-              </Button>
-              <div className="rounded-md border border-border/40 px-3 py-2 text-sm text-muted-foreground">
-                About AEON Ops: private operating intelligence for execution-focused planning and implementation.
+            <div className="mb-4 w-full max-w-4xl self-center">
+              <div className="max-h-56 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-3 sm:max-h-80">
+                {messages.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No messages yet. Start with a quick action or send a message.</p>
+                ) : (
+                  <div className="space-y-3">
+                    {messages.map((item) => (
+                      <article
+                        key={item.id}
+                        className={`rounded-lg border p-3 text-sm ${
+                          item.role === "user"
+                            ? "border-primary/40 bg-primary/10"
+                            : item.role === "assistant"
+                              ? "border-border/40 bg-secondary/20"
+                              : "border-amber-500/30 bg-amber-500/10"
+                        }`}
+                      >
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          {item.role} · {MODE_LABEL[item.mode]}
+                        </p>
+                        <p className="whitespace-pre-wrap">{item.text}</p>
+                        {item.sources && item.sources.length > 0 && (
+                          <p className="mt-2 text-xs text-muted-foreground">Used {item.sources.length} retrieved source(s).</p>
+                        )}
+                      </article>
+                    ))}
+                    {isLoading && <p className="text-sm text-muted-foreground">AEON is thinking...</p>}
+                  </div>
+                )}
               </div>
             </div>
-          </aside>
+
+            <div className="mt-auto w-full max-w-4xl self-center">
+              {isListening && (
+                <div className="mb-3 rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl sm:rounded-full sm:px-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-6">
+                    <div className="flex shrink-0 items-center gap-2">
+                      <div className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
+                      <p className="text-sm font-medium text-foreground">Listening...</p>
+                    </div>
+
+                    <div className="flex h-10 min-w-0 flex-1 items-center justify-center gap-[2px] overflow-hidden">
+                      {[...Array(waveBarCount)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="voice-wave-bar-horizontal shrink-0 rounded-full bg-foreground/70"
+                          style={{
+                            width: "2px",
+                            animationDelay: `${-i * 0.03}s`,
+                            animationDirection: "reverse",
+                          }}
+                        />
+                      ))}
+                    </div>
+
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button variant="ghost" size="icon" className="h-11 w-11 rounded-full" onClick={() => stopListening(true)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                      <Button size="icon" className="h-11 w-11 rounded-full" onClick={() => stopListening(false)}>
+                        <Check className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-2xl border border-border/50 bg-gradient-to-br from-secondary/70 via-secondary/60 to-secondary/50 p-3 shadow-2xl backdrop-blur-xl sm:p-4">
+                <div className="space-y-4">
+                  <textarea
+                    ref={composerInputRef}
+                    placeholder="Ask AEON anything..."
+                    value={inputMessage}
+                    onChange={(event) => setInputMessage(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (!isMobile && event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault()
+                        void submitChat("chat")
+                      }
+                    }}
+                    className="min-h-[96px] w-full resize-none border-none bg-transparent text-base text-foreground outline-none placeholder:text-muted-foreground sm:min-h-[84px]"
+                  />
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <span>Mode: {MODE_LABEL[activeMode]}</span>
+                    <span>·</span>
+                    <label className="flex items-center gap-2">
+                      <span>Model</span>
+                      <select
+                        value={selectedModel}
+                        onChange={(event) => setSelectedModel(event.target.value)}
+                        className="h-8 rounded-md border border-border/50 bg-background/70 px-2 text-xs text-foreground"
+                      >
+                        {models.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  {uploadedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {uploadedFiles.map((file) => (
+                        <div key={file.id} className="flex items-center gap-2 rounded-full border border-border/50 px-3 py-1 text-xs">
+                          <span>{file.name}</span>
+                          <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+                          <span
+                            className={`rounded-full px-2 py-0.5 ${
+                              file.status === "indexed"
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : file.status === "failed"
+                                  ? "bg-destructive/15 text-destructive"
+                                  : "bg-secondary/40 text-muted-foreground"
+                            }`}
+                          >
+                            {file.status || "uploaded"}
+                          </span>
+                          <button
+                            type="button"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => removeAttachment(file.id)}
+                            aria-label={`Remove ${file.name}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {(uiMessage || uploadMessage || voiceMessage || isRequestingMic || isUploading || lastFailedSubmission) && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <span>
+                        {isRequestingMic
+                          ? "Requesting microphone permission..."
+                          : isUploading
+                            ? "Uploading file..."
+                            : uiMessage || uploadMessage || voiceMessage}
+                      </span>
+                      {lastFailedSubmission && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2 text-xs"
+                          onClick={() => {
+                            void submitChat(lastFailedSubmission.mode, lastFailedSubmission.text)
+                          }}
+                          disabled={isLoading}
+                        >
+                          Retry last send
+                        </Button>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-3 border-t border-border/30 pt-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        className="hidden"
+                        accept=".pdf,.txt,.md,.json,.csv,.doc,.docx,.png,.jpg,.jpeg,.webp,.gif"
+                        onChange={(event) => {
+                          void handleFileInputChange(event)
+                        }}
+                      />
+                      <Button variant="ghost" size="sm" className="min-h-11 gap-2 px-3" onClick={() => fileInputRef.current?.click()}>
+                        <Paperclip className="h-4 w-4" />
+                        Attach
+                      </Button>
+
+                      <Button variant="ghost" size="sm" className="min-h-11 gap-2 px-3" onClick={() => setSettingsOpen(true)}>
+                        <Settings className="h-4 w-4" />
+                        Settings
+                      </Button>
+
+                      <div ref={optionsMenuRef} className="relative">
+                        <Button variant="ghost" size="sm" className="min-h-11 gap-2 px-3" onClick={() => setOptionsMenuOpen((prev) => !prev)}>
+                          Options
+                        </Button>
+
+                        {optionsMenuOpen && (
+                          <div className="dropdown-menu left-0">
+                            <button className="dropdown-item" onClick={() => setResponseStyle("balanced")}>
+                              Response mode: Balanced {responseStyle === "balanced" ? "(active)" : ""}
+                            </button>
+                            <button className="dropdown-item" onClick={() => setResponseStyle("direct")}>
+                              Response mode: Direct {responseStyle === "direct" ? "(active)" : ""}
+                            </button>
+                            <button className="dropdown-item" onClick={() => setResponseStyle("detailed")}>
+                              Response mode: Detailed {responseStyle === "detailed" ? "(active)" : ""}
+                            </button>
+                            <button className="dropdown-item" onClick={() => setIncludeExecutionSteps((prev) => !prev)}>
+                              Include execution steps: {includeExecutionSteps ? "on" : "off"}
+                            </button>
+                            <button className="dropdown-item" onClick={() => setUseUploadedContext((prev) => !prev)}>
+                              Use uploaded context: {useUploadedContext ? "enabled" : "off"}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`h-11 w-11 ${isListening ? "bg-primary/20 ring-1 ring-primary/60" : ""}`}
+                        aria-label={isListening ? "Stop voice input" : "Start voice input"}
+                        onClick={() => {
+                          if (isListening) {
+                            stopListening(false)
+                            return
+                          }
+
+                          void startVoiceInput()
+                        }}
+                      >
+                        <Mic className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        className="h-11 w-11 rounded-full"
+                        onClick={() => void submitChat("chat")}
+                        aria-label="Send message"
+                        disabled={isLoading || inputMessage.trim().length === 0}
+                      >
+                        <ArrowUp className="h-5 w-5" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {mobileSidebarOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setMobileSidebarOpen(false)} />
+          <div className="absolute inset-y-0 left-0 w-[86%] max-w-[320px]">{sidebarPanel}</div>
         </div>
       )}
 
@@ -810,323 +1315,21 @@ export function ChatArea() {
                 <span className="font-semibold">Current model:</span> {selectedModelLabel}
               </p>
               <p>
-                <span className="font-semibold">Vertex project:</span>{" "}
-                {statusInfo.vertexProjectConfigured ? "configured" : "not configured"}
+                <span className="font-semibold">RAG indexed docs:</span> {ragStatus.indexedDocuments}
               </p>
               <p>
-                <span className="font-semibold">Vertex location:</span>{" "}
-                {statusInfo.vertexLocationConfigured ? "configured" : "not configured"}
-              </p>
-              <p>
-                <span className="font-semibold">Theme:</span> current theme active
+                <span className="font-semibold">RAG chunks:</span> {ragStatus.chunks}
               </p>
               <p>
                 <span className="font-semibold">Voice input support:</span> browser-dependent
               </p>
               <p>
-                <span className="font-semibold">Upload/storage status:</span>{" "}
-                {statusInfo.uploadStorage === "enabled" ? "Knowledge upload enabled" : "Ready on first upload"}
-              </p>
-              <p>
-                <span className="font-semibold">Knowledge retrieval:</span> {statusInfo.knowledgeRetrieval}
-              </p>
-              <p>
-                <span className="font-semibold">RAG ingestion:</span> {statusInfo.ragIngestion}
-              </p>
-              <p>
-                <span className="font-semibold">Indexed documents:</span> {statusInfo.indexedDocuments}
-              </p>
-              <p>
-                <span className="font-semibold">Indexed chunks:</span> {statusInfo.indexedChunks}
-              </p>
-              <p>
-                <span className="font-semibold">App version:</span> v0.1.0
+                <span className="font-semibold">Theme and profile controls:</span> coming soon
               </p>
             </div>
           </section>
         </div>
       )}
-
-      <div className="relative z-10 flex flex-1 flex-col items-center px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:px-6 sm:pb-6 sm:pt-6">
-        <div className="relative mb-4 mt-1 w-full max-w-full overflow-visible sm:mb-8 sm:mt-2">
-          <ParticleOrb />
-        </div>
-
-        <h1 className="mb-5 text-center font-[var(--font-heading)] text-2xl font-semibold tracking-tight text-foreground sm:mb-8 sm:text-4xl">
-          Ready to Create Something New?
-        </h1>
-
-        <div className="mb-6 grid w-full max-w-4xl grid-cols-1 gap-2 sm:mb-8 sm:grid-cols-3 sm:gap-3">
-          <Button
-            variant="secondary"
-            className="btn-3d btn-glow h-11 w-full gap-2 bg-gradient-to-br from-secondary/90 to-secondary/70 font-medium text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-            onClick={() => void handleCreateImage()}
-          >
-            <ImageIcon className="h-4 w-4" />
-            Create Image
-          </Button>
-          <Button
-            variant="secondary"
-            className="btn-3d btn-glow h-11 w-full gap-2 bg-gradient-to-br from-secondary/90 to-secondary/70 font-medium text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-            onClick={() => void handleBrainstorm()}
-          >
-            <Lightbulb className="h-4 w-4" />
-            Brainstorm
-          </Button>
-          <Button
-            variant="secondary"
-            className="btn-3d btn-glow h-11 w-full gap-2 bg-gradient-to-br from-secondary/90 to-secondary/70 font-medium text-foreground shadow-lg backdrop-blur-sm hover:from-secondary/70 hover:to-secondary/50"
-            onClick={() => void handlePlan()}
-          >
-            <FileText className="h-4 w-4" />
-            Make a plan
-          </Button>
-        </div>
-
-        <div className="mb-4 w-full max-w-4xl">
-          <div className="max-h-52 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-3 sm:max-h-72">
-            {messages.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No messages yet. Use Send or a quick action to start.</p>
-            ) : (
-              <div className="space-y-3">
-                {messages.map((item) => (
-                  <article
-                    key={item.id}
-                    className={`rounded-lg border p-3 text-sm ${item.role === "user" ? "border-primary/40 bg-primary/10" : "border-border/40 bg-secondary/20"}`}
-                  >
-                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                      {item.role} · {MODE_LABEL[item.mode]}
-                    </p>
-                    <p className="whitespace-pre-wrap">{item.text}</p>
-                  </article>
-                ))}
-                {isLoading && <p className="text-sm text-muted-foreground">AEON Ops is thinking...</p>}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-auto w-full max-w-4xl">
-          {isListening && (
-            <div className="input-3d animate-in slide-in-from-bottom-2 mb-3 rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl duration-300 fade-in sm:rounded-full sm:px-6">
-              <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-6">
-                <div className="flex shrink-0 items-center gap-2">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
-                  <p className="text-sm font-medium text-foreground">Recording...</p>
-                </div>
-
-                <div className="flex h-10 min-w-0 flex-1 items-center justify-center gap-[2px] overflow-hidden">
-                  {[...Array(waveBarCount)].map((_, i) => (
-                    <div
-                      key={i}
-                      className="voice-wave-bar-horizontal shrink-0 rounded-full bg-foreground/70"
-                      style={{
-                        width: "2px",
-                        animationDelay: `${-i * 0.03}s`,
-                        animationDirection: "reverse",
-                      }}
-                    />
-                  ))}
-                </div>
-
-                <div className="flex shrink-0 items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="btn-3d h-11 w-11 rounded-full bg-secondary/30 text-white hover:bg-destructive/20 hover:text-destructive"
-                    onClick={() => stopListening(true)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    className="btn-3d btn-glow h-11 w-11 rounded-full bg-gradient-to-br from-primary via-gray-900 to-black text-white shadow-xl hover:from-gray-900 hover:to-black"
-                    onClick={() => stopListening(false)}
-                  >
-                    <Check className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="input-3d rounded-2xl border border-border/50 bg-gradient-to-br from-secondary/70 via-secondary/60 to-secondary/50 p-3 shadow-2xl backdrop-blur-xl sm:p-4">
-            <div className="space-y-4">
-              <div className="flex items-start gap-3">
-                <textarea
-                  placeholder="Ask Anything..."
-                  value={inputMessage}
-                  onChange={(event) => setInputMessage(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (!isMobile && event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault()
-                      void handleSend()
-                    }
-                  }}
-                  className="min-h-[96px] w-full flex-1 resize-none border-none bg-transparent text-base font-normal text-foreground outline-none placeholder:text-muted-foreground sm:min-h-[80px] sm:text-lg"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <span>Mode: {MODE_LABEL[activeMode]}</span>
-                <span>·</span>
-                <span>Model: {selectedModelLabel}</span>
-              </div>
-
-              {uploadedFiles.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {uploadedFiles.map((file) => (
-                    <div key={file.id} className="flex items-center gap-2 rounded-full border border-border/50 px-3 py-1 text-xs">
-                      <span>{file.name}</span>
-                      <span className="text-muted-foreground">{formatBytes(file.size)}</span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 ${
-                          file.status === "indexed"
-                            ? "bg-emerald-500/15 text-emerald-300"
-                            : file.status === "failed"
-                              ? "bg-destructive/15 text-destructive"
-                              : "bg-secondary/40 text-muted-foreground"
-                        }`}
-                      >
-                        {file.status || "uploaded"}
-                      </span>
-                      <button
-                        type="button"
-                        className="text-muted-foreground hover:text-foreground"
-                        onClick={() => removeAttachment(file.id)}
-                        aria-label={`Remove ${file.name}`}
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {(uiMessage || uploadMessage || voiceMessage || isRequestingMic || isUploading) && (
-                <p className="text-xs text-muted-foreground">
-                  {isRequestingMic
-                    ? "Requesting microphone permission..."
-                    : isUploading
-                      ? "Uploading file..."
-                      : uiMessage || uploadMessage || voiceMessage}
-                </p>
-              )}
-
-              <div className="flex flex-col gap-3 border-t border-border/30 pt-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    className="hidden"
-                    accept=".pdf,.txt,.md,.json,.csv,.doc,.docx,.png,.jpg,.jpeg,.webp,.gif"
-                    onChange={(event) => {
-                      void handleFileInputChange(event)
-                    }}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="btn-3d min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <Paperclip className="h-4 w-4" />
-                    Attach
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="btn-3d min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground"
-                    onClick={() => setSettingsOpen(true)}
-                  >
-                    <Settings className="h-4 w-4" />
-                    Settings
-                  </Button>
-
-                  <div ref={optionsMenuRef} className="relative">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="btn-3d min-h-11 gap-2 px-3 text-muted-foreground hover:text-foreground"
-                      onClick={() => setOptionsMenuOpen((prev) => !prev)}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M3 3H7V7H3V3Z" fill="currentColor" opacity="0.6" />
-                        <path d="M9 3H13V7H9V3Z" fill="currentColor" opacity="0.6" />
-                        <path d="M3 9H7V13H3V9Z" fill="currentColor" opacity="0.6" />
-                        <path d="M9 9H13V13H9V9Z" fill="currentColor" opacity="0.6" />
-                      </svg>
-                      Options
-                    </Button>
-
-                    {optionsMenuOpen && (
-                      <div className="dropdown-menu left-0">
-                        <button className="dropdown-item" onClick={() => setResponseStyle("balanced")}>
-                          Response mode: Balanced {responseStyle === "balanced" ? "(active)" : ""}
-                        </button>
-                        <button className="dropdown-item" onClick={() => setResponseStyle("direct")}>
-                          Response mode: Direct {responseStyle === "direct" ? "(active)" : ""}
-                        </button>
-                        <button className="dropdown-item" onClick={() => setResponseStyle("detailed")}>
-                          Response mode: Detailed {responseStyle === "detailed" ? "(active)" : ""}
-                        </button>
-                        <button
-                          className="dropdown-item"
-                          onClick={() => setIncludeExecutionSteps((prev) => !prev)}
-                        >
-                          Include execution steps: {includeExecutionSteps ? "on" : "off"}
-                        </button>
-                        <button
-                          className="dropdown-item"
-                          onClick={() => setUseUploadedContext((prev) => !prev)}
-                        >
-                          Use uploaded context: {useUploadedContext ? "enabled" : "off"}
-                        </button>
-                        <button className="dropdown-item" onClick={clearChat}>
-                          Clear current chat
-                        </button>
-                        <button className="dropdown-item" onClick={() => void copyLastResponse()}>
-                          Copy last response
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className={`btn-3d h-11 w-11 text-white hover:text-foreground ${isListening ? "bg-primary/20 ring-1 ring-primary/60" : ""}`}
-                    aria-label={isListening ? "Stop voice input" : "Start voice input"}
-                    onClick={() => {
-                      if (isListening) {
-                        stopListening(false)
-                        return
-                      }
-
-                      void startVoiceInput()
-                    }}
-                  >
-                    <Mic className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    className="btn-3d btn-glow h-11 w-11 rounded-full bg-gradient-to-br from-primary via-gray-900 to-black text-white shadow-xl hover:from-gray-900 hover:to-black"
-                    onClick={() => void handleSend()}
-                    aria-label="Send message"
-                    disabled={isLoading || inputMessage.trim().length === 0}
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
     </main>
   )
 }

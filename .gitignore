@@ -49,3 +49,10 @@ tsconfig.tsbuildinfo
 # accidental shell paste artifacts
 -ef *
 -o StrictHostKeyChecking*
+# AEON private/generated RAG corpus artifacts
+storage/manifests/
+storage/imports/
+storage/uploads/
+*.jsonl
+*.tsv
+-ef*

@@ -1,14 +1,13 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
-import pool from "@/lib/db"
+import { getRagStats } from "@/lib/rag/db"
 
 const MODELS = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
   { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
-  { id: "gemini-1.5-pro", label: "AEON / Gemini 1.5 Pro" },
-  { id: "gemini-1.5-flash", label: "AEON / Gemini 1.5 Flash" },
   { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
+  { id: "gemini-1.5-pro", label: "AEON / Gemini 1.5 Pro" },
 ]
 
 export const runtime = "nodejs"
@@ -33,14 +32,10 @@ export async function GET() {
   let ragStats = { indexedDocuments: 0, chunks: 0 }
 
   try {
-    const [indexedDocuments, chunks] = await Promise.all([
-      pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM documents WHERE status = 'indexed'"),
-      pool.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM chunks"),
-    ])
-
+    const stats = await getRagStats()
     ragStats = {
-      indexedDocuments: Number(indexedDocuments.rows[0]?.count || "0"),
-      chunks: Number(chunks.rows[0]?.count || "0"),
+      indexedDocuments: stats.indexedDocuments,
+      chunks: stats.chunks,
     }
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : "Unknown RAG stats error"

@@ -2,6 +2,13 @@ import { generateText } from "ai"
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
+import {
+  appendChatMessage,
+  createChatSession,
+  getChatSession,
+  makeSessionTitleFromMessage,
+  updateSessionTitleIfNew,
+} from "@/lib/chat-store"
 import { retrieveContext } from "@/lib/retrieve"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
@@ -11,6 +18,7 @@ type ChatRequest = {
   message?: unknown
   mode?: unknown
   model?: unknown
+  sessionId?: unknown
   attachments?: unknown
   options?: {
     responseStyle?: unknown
@@ -19,7 +27,7 @@ type ChatRequest = {
   }
 }
 
-const DEFAULT_MODEL = process.env.VERTEX_MODEL || "gemini-1.5-pro"
+const DEFAULT_MODEL = process.env.VERTEX_MODEL || "gemini-2.5-flash"
 const SYSTEM_PROMPT =
   "You are AEON Ops, a private operating intelligence layer for Daniel Cruz. Be direct, execution-focused, and practical. Help turn ideas into plans, system prompts, architecture, and implementation steps."
 
@@ -100,6 +108,7 @@ export async function POST(request: Request) {
   const message = typeof body.message === "string" ? body.message.trim() : ""
   const mode: ChatMode = isMode(body.mode) ? body.mode : "chat"
   const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
+  const sessionIdInput = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : ""
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const responseStyle = isResponseStyle(body.options?.responseStyle) ? body.options?.responseStyle : "balanced"
   const includeExecutionSteps = body.options?.includeExecutionSteps === true
@@ -205,6 +214,28 @@ export async function POST(request: Request) {
   let lastError = "Unknown Vertex request failure"
   const { vertex } = await import("@ai-sdk/google-vertex")
 
+  let sessionId = sessionIdInput
+  if (sessionId) {
+    const existingSession = await getChatSession(sessionId)
+    if (!existingSession) {
+      sessionId = ""
+    }
+  }
+
+  if (!sessionId) {
+    const created = await createChatSession("New Chat")
+    sessionId = created.id
+  }
+
+  await appendChatMessage({
+    sessionId,
+    role: "user",
+    content: message,
+    model,
+  })
+
+  await updateSessionTitleIfNew(sessionId, makeSessionTitleFromMessage(message))
+
   for (const candidate of candidateModels) {
     try {
       const result = await generateText({
@@ -218,12 +249,20 @@ export async function POST(request: Request) {
         textLength: result.text.length,
       })
 
+      await appendChatMessage({
+        sessionId,
+        role: "assistant",
+        content: result.text,
+        model: candidate,
+        ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
+      })
+
       return NextResponse.json({
         ok: true,
         message: result.text,
         mode,
         model: candidate,
-        chatId: undefined,
+        sessionId,
         ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
       })
     } catch (error) {
