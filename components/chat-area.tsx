@@ -168,7 +168,8 @@ function getInitials(input: string) {
 
 export function ChatArea() {
   const isMobile = useIsMobile()
-  const { data: session } = useSession()
+  const sessionState = useSession()
+  const session = sessionState?.data
   const waveBarCount = isMobile ? 24 : 52
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
