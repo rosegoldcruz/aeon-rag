@@ -87,7 +87,7 @@ type FailedSubmission = {
 }
 
 type ToolPanelItem = {
-  key: "documents" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
+  key: "documents" | "drive_imports" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
   label: string
   state: "enabled" | "disabled" | "coming_soon"
   detail: string
@@ -220,6 +220,12 @@ export function ChatArea() {
       detail: "Checking...",
     },
     {
+      key: "drive_imports",
+      label: "Drive Imports",
+      state: "disabled",
+      detail: "CLI only (run rag:drive:ingest)",
+    },
+    {
       key: "memory",
       label: "Memory",
       state: "disabled",
@@ -344,6 +350,13 @@ export function ChatArea() {
       detail: "Not configured",
     }
 
+    let driveImportsState: ToolPanelItem = {
+      key: "drive_imports",
+      label: "Drive Imports",
+      state: "disabled",
+      detail: "CLI only (run rag:drive:ingest)",
+    }
+
     try {
       setOrbState("reading_docs")
       const ragResponse = await fetch("/api/tools/rag/status", { cache: "no-store" })
@@ -409,8 +422,40 @@ export function ChatArea() {
       }
     }
 
+    try {
+      setOrbState("reading_docs")
+      const driveResponse = await fetch("/api/tools/drive/imports/status", { cache: "no-store" })
+      const drivePayload = (await driveResponse.json()) as {
+        ok?: boolean
+        hasRuns?: boolean
+        latestStatus?: string | null
+        indexedDriveDocuments?: number
+      }
+
+      const indexed = Number(drivePayload.indexedDriveDocuments || 0)
+      const latestStatus = drivePayload.latestStatus || "none"
+
+      driveImportsState = {
+        key: "drive_imports",
+        label: "Drive Imports",
+        state: indexed > 0 || latestStatus === "success" || latestStatus === "partial" ? "enabled" : "disabled",
+        detail:
+          driveResponse.ok && drivePayload.ok
+            ? `latest=${latestStatus}, indexed=${indexed} (CLI only)`
+            : "CLI only (run rag:drive:ingest)",
+      }
+    } catch {
+      driveImportsState = {
+        key: "drive_imports",
+        label: "Drive Imports",
+        state: "disabled",
+        detail: "CLI only (run rag:drive:ingest)",
+      }
+    }
+
     setToolPanelItems((prev) => [
       documentsState,
+      driveImportsState,
       memoryState,
       ...prev.filter((item) => item.state === "coming_soon"),
     ])

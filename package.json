@@ -10,6 +10,7 @@
     "lint": "eslint .",
     "ops:self-heal:check": "bash scripts/self-heal-check.sh",
     "ops:self-heal:loop": "bash scripts/self-heal-loop.sh",
+    "rag:drive:ingest": "tsx scripts/ingest-drive-rag.ts",
     "rag:drive:hunt-google-native": "tsx scripts/hunt-google-native-docs.ts",
     "rag:manifest": "tsx scripts/build-drive-manifest.ts",
     "rag:migrate": "tsx scripts/migrate-rag.ts",

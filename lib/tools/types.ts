@@ -1,6 +1,13 @@
 export type ToolStatus = "enabled" | "disabled" | "coming_soon"
 
-export type ToolType = "documents_rag" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
+export type ToolType =
+  | "documents_rag"
+  | "drive_imports"
+  | "memory"
+  | "vision"
+  | "image_generation"
+  | "github"
+  | "mcp_servers"
 
 export type ToolRegistryEntry = {
   name: string
@@ -19,6 +26,7 @@ export type RuntimeStoragePaths = {
   driveImports: string
   driveExtracted: string
   driveFailed: string
+  driveQueue: string
   uploads: string
   toolRuns: string
   memory: string
@@ -35,6 +43,7 @@ export function getRuntimeStoragePaths(): RuntimeStoragePaths {
     driveImports: `${root}/drive/imports`,
     driveExtracted: `${root}/drive/extracted`,
     driveFailed: `${root}/drive/failed`,
+    driveQueue: `${root}/drive/queue`,
     uploads: `${root}/uploads`,
     toolRuns: `${root}/tool-runs`,
     memory: `${root}/memory`,

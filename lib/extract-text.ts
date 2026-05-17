@@ -1,5 +1,6 @@
 import { access, readFile } from "node:fs/promises"
 import { extname } from "node:path"
+import { PDFParse } from "pdf-parse"
 
 const MAX_TEXT_BYTES = 20 * 1024 * 1024
 
@@ -35,7 +36,19 @@ export async function extractTextFromFile(filePath: string, mimeType?: string): 
     }
 
     if (extension === ".pdf" || mimeType === "application/pdf") {
-      throw new Error("PDF parsing is coming next for this file.")
+      const parser = new PDFParse({ data: raw })
+
+      try {
+        const parsed = await parser.getText()
+        const text = (parsed.text || "").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+        if (!text) {
+          throw new Error("PDF parsed but no text content was extracted.")
+        }
+
+        return text
+      } finally {
+        await parser.destroy()
+      }
     }
 
     return asUtf8()

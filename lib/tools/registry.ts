@@ -11,6 +11,51 @@ async function isMemoryToolEnabled() {
   }
 }
 
+async function getDriveImportsState() {
+  try {
+    const [latestJob, indexedDocs] = await Promise.all([
+      pool.query<{ status: string; imported_count: string; failed_count: string }>(
+        `
+        SELECT status, imported_count::text, failed_count::text
+        FROM drive_import_jobs
+        ORDER BY started_at DESC
+        LIMIT 1
+        `,
+      ),
+      pool.query<{ count: string }>(
+        `
+        SELECT COUNT(*)::text AS count
+        FROM documents
+        WHERE source = 'google_drive' AND status = 'indexed'
+        `,
+      ),
+    ])
+
+    const latest = latestJob.rows[0]
+    const indexedCount = Number(indexedDocs.rows[0]?.count || "0")
+
+    if (!latest) {
+      return {
+        enabled: false,
+        message: "No Drive import jobs yet. Run CLI ingestion.",
+      }
+    }
+
+    const imported = Number(latest.imported_count || "0")
+    const failed = Number(latest.failed_count || "0")
+
+    return {
+      enabled: latest.status === "success" || latest.status === "partial" || indexedCount > 0,
+      message: `latest=${latest.status}, indexed=${indexedCount}, imported=${imported}, failed=${failed}`,
+    }
+  } catch {
+    return {
+      enabled: false,
+      message: "Drive imports not configured yet.",
+    }
+  }
+}
+
 export async function getToolRegistry(): Promise<{
   runtimePaths: ReturnType<typeof getRuntimeStoragePaths>
   tools: ToolRegistryEntry[]
@@ -30,6 +75,7 @@ export async function getToolRegistry(): Promise<{
   }
 
   const memoryEnabled = await isMemoryToolEnabled()
+  const driveImports = await getDriveImportsState()
 
   return {
     runtimePaths,
@@ -41,6 +87,14 @@ export async function getToolRegistry(): Promise<{
         status: documentsEnabled ? "enabled" : "disabled",
         configured: documentsEnabled,
         message: documentsMessage,
+      },
+      {
+        name: "drive_imports",
+        type: "drive_imports",
+        label: "Drive Imports",
+        status: driveImports.enabled ? "enabled" : "disabled",
+        configured: driveImports.enabled,
+        message: driveImports.message,
       },
       {
         name: "memory",
