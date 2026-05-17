@@ -1,8 +1,58 @@
-import { access, readFile } from "node:fs/promises"
+import { access, mkdtemp, readFile, rm } from "node:fs/promises"
 import { extname } from "node:path"
-import { PDFParse } from "pdf-parse"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
+import { spawn } from "node:child_process"
 
 const MAX_TEXT_BYTES = 20 * 1024 * 1024
+
+async function runPdftotext(filePath: string): Promise<string> {
+  const tempDir = await mkdtemp(join(tmpdir(), "aeon-pdftotext-"))
+  const outputPath = join(tempDir, "out.txt")
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn("pdftotext", ["-layout", filePath, outputPath], {
+        stdio: ["ignore", "pipe", "pipe"],
+      })
+
+      let stderr = ""
+      child.stderr.setEncoding("utf8")
+      child.stderr.on("data", (chunk: string) => {
+        stderr += chunk
+      })
+
+      child.on("error", (error) => {
+        const code = (error as NodeJS.ErrnoException).code || ""
+        if (code === "ENOENT") {
+          reject(new Error("Missing PDF extractor dependency: pdftotext (poppler-utils)"))
+          return
+        }
+
+        reject(error)
+      })
+
+      child.on("close", (code) => {
+        if (code !== 0) {
+          reject(new Error(`pdftotext failed with exit code ${code}: ${stderr.trim()}`))
+          return
+        }
+
+        resolve()
+      })
+    })
+
+    const extracted = await readFile(outputPath, "utf8")
+    const normalized = extracted.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+    if (!normalized) {
+      throw new Error("PDF parsed but no text content was extracted.")
+    }
+
+    return normalized
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+}
 
 export async function extractTextFromFile(filePath: string, mimeType?: string): Promise<string> {
   await access(filePath)
@@ -36,19 +86,7 @@ export async function extractTextFromFile(filePath: string, mimeType?: string): 
     }
 
     if (extension === ".pdf" || mimeType === "application/pdf") {
-      const parser = new PDFParse({ data: raw })
-
-      try {
-        const parsed = await parser.getText()
-        const text = (parsed.text || "").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
-        if (!text) {
-          throw new Error("PDF parsed but no text content was extracted.")
-        }
-
-        return text
-      } finally {
-        await parser.destroy()
-      }
+      return runPdftotext(filePath)
     }
 
     return asUtf8()

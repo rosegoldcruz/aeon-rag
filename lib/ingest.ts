@@ -4,7 +4,7 @@ import { chunkText } from "@/lib/chunk"
 import { embedBatch, EXPECTED_EMBEDDING_DIMENSION } from "@/lib/embed"
 import { extractTextFromFile } from "@/lib/extract-text"
 
-const UPLOAD_ROOT = "/home/aeon-rag/storage/uploads"
+const UPLOAD_ROOT = "/var/lib/aeonops/uploads"
 
 type IngestInput = {
   storedPath: string
@@ -14,7 +14,7 @@ type IngestInput = {
 }
 
 export async function ingestStoredFile(input: IngestInput): Promise<{ documentId: string; chunkCount: number }> {
-  const absolutePath = resolve("/home/aeon-rag", input.storedPath)
+  const absolutePath = input.storedPath.startsWith("/") ? resolve(input.storedPath) : resolve(UPLOAD_ROOT, input.storedPath)
   const uploadRoot = resolve(UPLOAD_ROOT)
 
   if (!absolutePath.startsWith(uploadRoot)) {
@@ -67,6 +67,14 @@ export async function ingestStoredFile(input: IngestInput): Promise<{ documentId
         VALUES ($1, $2, $3, $4::vector)
         `,
         [documentId, chunks[i], i, vectorLiteral],
+      )
+
+      await client.query(
+        `
+        INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
+        VALUES ($1, $2, $3, $4::vector)
+        `,
+        [documentId, i, chunks[i], vectorLiteral],
       )
     }
 

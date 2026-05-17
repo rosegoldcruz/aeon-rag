@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, rename, writeFile } from "node:fs/promises"
 import { extname, basename } from "node:path"
 import { randomUUID } from "node:crypto"
 import { NextResponse } from "next/server"
@@ -6,7 +6,8 @@ import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { ingestStoredFile } from "@/lib/ingest"
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024
-const UPLOAD_DIR = "/home/aeon-rag/storage/uploads"
+const UPLOAD_DIR = "/var/lib/aeonops/uploads"
+const FAILED_UPLOAD_DIR = "/var/lib/aeonops/uploads/failed"
 const INLINE_INGEST_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv", ".pdf"])
 const ALLOWED_EXTENSIONS = new Set([
   ".pdf",
@@ -97,10 +98,10 @@ export async function POST(request: Request) {
   const id = randomUUID()
   const storedName = `${id}-${sanitized}`
   const storagePath = `${UPLOAD_DIR}/${storedName}`
-  const relativeStoredPath = `storage/uploads/${storedName}`
 
   try {
     await mkdir(UPLOAD_DIR, { recursive: true })
+    await mkdir(FAILED_UPLOAD_DIR, { recursive: true })
     const bytes = Buffer.from(await file.arrayBuffer())
     await writeFile(storagePath, bytes)
   } catch (error) {
@@ -126,7 +127,7 @@ export async function POST(request: Request) {
   if (INLINE_INGEST_EXTENSIONS.has(extension)) {
     try {
       const ingestedResult = await ingestStoredFile({
-        storedPath: relativeStoredPath,
+        storedPath: storagePath,
         name: sanitized,
         type: fileType,
         sizeBytes: file.size,
@@ -143,11 +144,21 @@ export async function POST(request: Request) {
       if (
         safeMessage.includes("Unsupported file type") ||
         safeMessage.includes("coming next") ||
-        safeMessage.includes("No chunks")
+        safeMessage.includes("No chunks") ||
+        safeMessage.includes("Missing PDF extractor dependency")
       ) {
         status = "uploaded"
       } else {
         status = "failed"
+      }
+
+      if (status === "failed") {
+        try {
+          const failedPath = `${FAILED_UPLOAD_DIR}/${storedName}`
+          await rename(storagePath, failedPath)
+        } catch {
+          // Leave original file in upload dir if move fails.
+        }
       }
     }
   } else {
@@ -162,12 +173,13 @@ export async function POST(request: Request) {
       name: sanitized,
       size: file.size,
       type: fileType,
-      storedPath: relativeStoredPath,
+      storedPath: storagePath,
       status,
     },
     ingested,
     documentId,
     chunkCount,
+    reason: ingested ? "Indexed for retrieval." : ingestError || "Not indexed.",
     ...(ingested ? {} : { ingestError }),
   })
 }

@@ -64,6 +64,11 @@ type UploadedFile = {
   ingestError?: string
 }
 
+type UploadFailure = {
+  name: string
+  reason: string
+}
+
 type SpeechRecognitionLike = {
   continuous: boolean
   interimResults: boolean
@@ -768,7 +773,7 @@ export function ChatArea() {
     setUploadMessage("")
 
     const uploaded: UploadedFile[] = []
-    const failed: string[] = []
+    const failed: UploadFailure[] = []
 
     for (const file of files) {
       const formData = new FormData()
@@ -786,6 +791,7 @@ export function ChatArea() {
           ingested?: boolean
           chunkCount?: number
           ingestError?: string
+          reason?: string
           error?: string
         }
 
@@ -801,8 +807,18 @@ export function ChatArea() {
           status: payload.ingested ? "indexed" : payload.file.status,
           indexingMessage: payload.ingested ? "Indexed for retrieval" : payload.ingestError || payload.file.indexingMessage,
         })
+
+        if (!payload.ingested && payload.file.status === "failed") {
+          failed.push({
+            name: payload.file.name,
+            reason: payload.ingestError || payload.reason || "Unknown ingestion failure",
+          })
+        }
       } catch {
-        failed.push(file.name)
+        failed.push({
+          name: file.name,
+          reason: "Upload request failed.",
+        })
       }
     }
 
@@ -818,7 +834,8 @@ export function ChatArea() {
     }
 
     if (failed.length > 0) {
-      setUploadMessage(`Some uploads failed: ${failed.join(", ")}`)
+      const details = failed.map((item) => `${item.name}: ${item.reason}`).join(" | ")
+      setUploadMessage(`Some uploads failed: ${details}`)
     }
 
     setIsUploading(false)
