@@ -1,11 +1,26 @@
 import { Pool } from "pg"
 
-if (!process.env.POSTGRES_URL) {
-  throw new Error("POSTGRES_URL is required")
+let pool: Pool | null = null
+
+export function getPool() {
+  if (pool) {
+    return pool
+  }
+
+  const connectionString = process.env.POSTGRES_URL
+  if (!connectionString) {
+    throw new Error("POSTGRES_URL is required")
+  }
+
+  pool = new Pool({ connectionString })
+  return pool
 }
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
+const lazyPool = new Proxy({} as Pool, {
+  get(_target, property: keyof Pool) {
+    const value = getPool()[property]
+    return typeof value === "function" ? value.bind(getPool()) : value
+  },
 })
 
-export default pool
+export default lazyPool

@@ -1,14 +1,16 @@
 import { embed, embedMany } from "ai"
-import { vertex } from "@ai-sdk/google-vertex"
 
 export const EMBEDDING_MODEL_ID = "text-embedding-004"
 export const EXPECTED_EMBEDDING_DIMENSION = 768
 
-const embeddingModel = vertex.textEmbeddingModel(EMBEDDING_MODEL_ID)
+async function getEmbeddingModel() {
+  const { vertex } = await import("@ai-sdk/google-vertex")
+  return vertex.textEmbeddingModel(EMBEDDING_MODEL_ID)
+}
 
 export async function embedText(text: string): Promise<number[]> {
   const { embedding } = await embed({
-    model: embeddingModel,
+    model: await getEmbeddingModel(),
     value: text,
   })
 
@@ -21,7 +23,7 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
   }
 
   const { embeddings } = await embedMany({
-    model: embeddingModel,
+    model: await getEmbeddingModel(),
     values: texts,
   })
 

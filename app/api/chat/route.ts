@@ -1,5 +1,4 @@
 import { generateText } from "ai"
-import { vertex } from "@ai-sdk/google-vertex"
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
@@ -204,6 +203,7 @@ export async function POST(request: Request) {
     .join("\n\n")
 
   let lastError = "Unknown Vertex request failure"
+  const { vertex } = await import("@ai-sdk/google-vertex")
 
   for (const candidate of candidateModels) {
     try {
