@@ -65,7 +65,7 @@ echo "13) Verify..."
 pm2 list
 
 echo "Waiting for local app on port 3000..."
-for i in {1..20}; do
+for i in {1..30}; do
   if curl -fsS -I http://127.0.0.1:3000 >/dev/null 2>&1; then
     echo "Local app is responding."
     break

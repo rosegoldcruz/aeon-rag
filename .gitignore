@@ -42,3 +42,10 @@ tsconfig.tsbuildinfo
 # accidental shell paste artifacts
 -ef *
 -o StrictHostKeyChecking*
+
+# TypeScript incremental cache
+tsconfig.tsbuildinfo
+
+# accidental shell paste artifacts
+-ef *
+-o StrictHostKeyChecking*
