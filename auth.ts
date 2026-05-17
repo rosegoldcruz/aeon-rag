@@ -21,10 +21,14 @@ function requiredEnv(name: string, allowEmpty = false) {
   return value.trim()
 }
 
+function optionalEnv(name: string) {
+  return process.env[name]?.trim() || ""
+}
+
 const issuer = requiredEnv("ZITADEL_ISSUER")
 const wellKnown = requiredEnv("ZITADEL_WELLKNOWN")
 const clientId = requiredEnv("ZITADEL_CLIENT_ID")
-const clientSecret = requiredEnv("ZITADEL_CLIENT_SECRET", true)
+const clientSecret = optionalEnv("ZITADEL_CLIENT_SECRET")
 
 const zitadelProvider: OAuthConfig<ZitadelProfile> = {
   id: "zitadel",
