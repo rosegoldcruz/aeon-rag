@@ -197,6 +197,8 @@ export function ChatArea() {
     return models.find((item) => item.id === selectedModel)?.label || selectedModel
   }, [models, selectedModel])
 
+  const sidebarIsCollapsed = !isMobile && sidebarCollapsed
+
   const visibleSessions = useMemo(() => {
     const needle = sessionSearch.trim().toLowerCase()
     if (!needle) {
@@ -392,6 +394,31 @@ export function ChatArea() {
       document.removeEventListener("keydown", onKeyDown)
     }
   }, [])
+
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileSidebarOpen(false)
+    }
+  }, [isMobile])
+
+  useEffect(() => {
+    const body = document.body
+    const previousOverflow = body.style.overflow
+    const previousTouchAction = body.style.touchAction
+
+    if (isMobile && mobileSidebarOpen) {
+      body.style.overflow = "hidden"
+      body.style.touchAction = "none"
+    } else {
+      body.style.overflow = ""
+      body.style.touchAction = ""
+    }
+
+    return () => {
+      body.style.overflow = previousOverflow
+      body.style.touchAction = previousTouchAction
+    }
+  }, [isMobile, mobileSidebarOpen])
 
   useEffect(() => {
     if (!activeSessionId) {
@@ -858,7 +885,7 @@ export function ChatArea() {
   const sidebarPanel = (
     <aside
       className={`h-full border-r border-border/40 bg-background/80 backdrop-blur-sm transition-all duration-200 ${
-        sidebarCollapsed ? "w-[84px]" : "w-[300px]"
+        sidebarIsCollapsed ? "w-[84px]" : "w-[300px]"
       }`}
     >
       <div className="flex h-full flex-col">
@@ -872,10 +899,16 @@ export function ChatArea() {
               variant="ghost"
               size="icon"
               className="h-9 w-9"
-              onClick={() => setSidebarCollapsed((prev) => !prev)}
-              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={() => {
+                if (isMobile) {
+                  setMobileSidebarOpen(false)
+                  return
+                }
+                setSidebarCollapsed((prev) => !prev)
+              }}
+              aria-label={isMobile ? "Close sidebar" : sidebarIsCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {sidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              {isMobile ? <X className="h-4 w-4" /> : sidebarIsCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </Button>
           </div>
 
@@ -889,10 +922,10 @@ export function ChatArea() {
             }}
           >
             <FileText className="h-4 w-4" />
-            {!sidebarCollapsed && "New Chat"}
+            {!sidebarIsCollapsed && "New Chat"}
           </Button>
 
-          {!sidebarCollapsed && (
+          {!sidebarIsCollapsed && (
             <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/50 px-2 py-1.5">
               <Search className="h-4 w-4 text-muted-foreground" />
               <input
@@ -907,7 +940,7 @@ export function ChatArea() {
 
         <div className="flex-1 overflow-y-auto p-2">
           <div className="space-y-1">
-            {visibleSessions.length === 0 && !sidebarCollapsed ? (
+            {visibleSessions.length === 0 && !sidebarIsCollapsed ? (
               <div className="rounded-md border border-dashed border-border/50 p-3 text-xs text-muted-foreground">
                 No chats yet. Start with New Chat.
               </div>
@@ -930,9 +963,9 @@ export function ChatArea() {
                       }}
                     >
                       <p className={`truncate text-sm ${isActive ? "font-semibold" : "font-medium"}`}>
-                        {sidebarCollapsed ? "Chat" : session.title}
+                        {sidebarIsCollapsed ? "Chat" : session.title}
                       </p>
-                      {!sidebarCollapsed && (
+                      {!sidebarIsCollapsed && (
                         <>
                           <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
                             {stripPreview(session.lastMessagePreview) || "No messages yet"}
@@ -941,7 +974,7 @@ export function ChatArea() {
                         </>
                       )}
                     </button>
-                    {!sidebarCollapsed && (
+                    {!sidebarIsCollapsed && (
                       <div className="mt-2 flex justify-end">
                         <Button
                           variant="ghost"
@@ -963,7 +996,7 @@ export function ChatArea() {
           </div>
         </div>
 
-        {!sidebarCollapsed && (
+        {!sidebarIsCollapsed && (
           <div className="border-t border-border/40 p-3 text-xs text-muted-foreground">
             <p className="font-medium text-foreground">RAG Status</p>
             <p className="mt-1">Indexed docs: {ragStatus.indexedDocuments}</p>
@@ -990,7 +1023,9 @@ export function ChatArea() {
                 variant="secondary"
                 size="icon"
                 className="h-10 w-10 md:hidden"
-                onClick={() => setMobileSidebarOpen(true)}
+                onClick={() => {
+                  setMobileSidebarOpen(true)
+                }}
                 aria-label="Open chat sidebar"
               >
                 <Menu className="h-5 w-5" />
@@ -1292,12 +1327,27 @@ export function ChatArea() {
         </section>
       </div>
 
-      {mobileSidebarOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setMobileSidebarOpen(false)} />
-          <div className="absolute inset-y-0 left-0 w-[86%] max-w-[320px]">{sidebarPanel}</div>
+      <div
+        className={`fixed inset-0 z-50 transition-opacity duration-200 md:hidden ${
+          mobileSidebarOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        aria-hidden={!mobileSidebarOpen}
+      >
+        <button
+          type="button"
+          className="absolute inset-0 bg-black/60"
+          onClick={() => setMobileSidebarOpen(false)}
+          aria-label="Close sidebar backdrop"
+          tabIndex={mobileSidebarOpen ? 0 : -1}
+        />
+        <div
+          className={`absolute inset-y-0 left-0 w-[86%] max-w-[320px] transform transition-transform duration-200 ${
+            mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          {sidebarPanel}
         </div>
-      )}
+      </div>
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

@@ -34,3 +34,12 @@ Before every commit, run:
 - git ls-files | grep -E 'storage/manifests|storage/imports|storage/uploads|\.jsonl$|\.tsv$|tsconfig\.tsbuildinfo' && stop
 
 If any private corpus file appears in Git, stop immediately. Do not commit. Do not push.
+
+## Deployment Workflow Rule
+
+For this repository, after completing any user-requested code change, deploy using:
+- ./deploy.sh "<commit message>"
+
+This ensures the change is committed, pushed, built, and PM2-restarted in one flow.
+
+Only skip deploy.sh if the user explicitly requests not to deploy.
