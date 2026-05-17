@@ -8,6 +8,7 @@
     "check": "pnpm lint",
     "dev": "next dev",
     "lint": "eslint .",
+    "rag:drive:hunt-google-native": "tsx scripts/hunt-google-native-docs.ts",
     "rag:manifest": "tsx scripts/build-drive-manifest.ts",
     "rag:migrate": "tsx scripts/migrate-rag.ts",
     "start": "next start"
