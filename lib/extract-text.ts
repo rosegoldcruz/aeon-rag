@@ -6,6 +6,25 @@ import { spawn } from "node:child_process"
 
 const MAX_TEXT_BYTES = 20 * 1024 * 1024
 
+/**
+ * Remove characters that Postgres UTF-8 will reject before any DB insert.
+ * Specifically strips null bytes (\u0000) and other C0/C1 control characters
+ * that have no printable meaning, while preserving tabs, newlines, and all
+ * normal Unicode content.
+ */
+export function sanitizeText(text: string): string {
+  return (
+    text
+      // Strip null bytes — the primary cause of the UTF8: 0x00 Postgres error
+      .replace(/\u0000/g, "")
+      // Strip other non-printable C0 control chars except \t (0x09), \n (0x0a), \r (0x0d)
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+      // Strip C1 control characters (0x80–0x9f) which are invalid in UTF-8 prose
+      .replace(/[\u0080-\u009f]/g, "")
+  )
+}
+
 async function runPdftotext(filePath: string): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), "aeon-pdftotext-"))
   const outputPath = join(tempDir, "out.txt")
@@ -43,9 +62,11 @@ async function runPdftotext(filePath: string): Promise<string> {
     })
 
     const extracted = await readFile(outputPath, "utf8")
-    const normalized = extracted.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+    const normalized = sanitizeText(
+      extracted.replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+    )
     if (!normalized) {
-      throw new Error("PDF parsed but no text content was extracted.")
+      throw new Error("Extracted text was empty after sanitization")
     }
 
     return normalized
@@ -64,7 +85,8 @@ export async function extractTextFromFile(filePath: string, mimeType?: string): 
     throw new Error("File too large for inline extraction.")
   }
 
-  const asUtf8 = () => raw.toString("utf8").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+  const asUtf8 = () =>
+    sanitizeText(raw.toString("utf8").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim())
 
   const isTextLike = [".txt", ".md", ".json", ".csv"].includes(extension)
   const isSupportedMime = [

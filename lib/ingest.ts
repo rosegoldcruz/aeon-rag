@@ -2,7 +2,7 @@ import { extname, resolve } from "node:path"
 import pool from "@/lib/db"
 import { chunkText } from "@/lib/chunk"
 import { embedBatch, EXPECTED_EMBEDDING_DIMENSION } from "@/lib/embed"
-import { extractTextFromFile } from "@/lib/extract-text"
+import { extractTextFromFile, sanitizeText } from "@/lib/extract-text"
 
 const UPLOAD_ROOT = "/var/lib/aeonops/uploads"
 
@@ -38,7 +38,17 @@ export async function ingestStoredFile(input: IngestInput): Promise<{ documentId
 
     documentId = insertDocument.rows[0].id
 
-    const text = await extractTextFromFile(absolutePath, input.type)
+    const text = sanitizeText(await extractTextFromFile(absolutePath, input.type))
+
+    if (!text) {
+      await client.query(
+        "UPDATE documents SET status = 'failed', error = $2, updated_at = NOW() WHERE id = $1",
+        [documentId, "Extracted text was empty after sanitization"],
+      )
+      await client.query("COMMIT")
+      throw new Error("Extracted text was empty after sanitization")
+    }
+
     const chunks = chunkText(text)
 
     if (chunks.length === 0) {
@@ -53,6 +63,7 @@ export async function ingestStoredFile(input: IngestInput): Promise<{ documentId
     const embeddings = await embedBatch(chunks)
 
     for (let i = 0; i < chunks.length; i += 1) {
+      const chunkContent = sanitizeText(chunks[i])
       const embedding = embeddings[i]
       if (!embedding || embedding.length !== EXPECTED_EMBEDDING_DIMENSION) {
         throw new Error(
@@ -66,7 +77,7 @@ export async function ingestStoredFile(input: IngestInput): Promise<{ documentId
         INSERT INTO chunks (document_id, content, chunk_index, embedding)
         VALUES ($1, $2, $3, $4::vector)
         `,
-        [documentId, chunks[i], i, vectorLiteral],
+        [documentId, chunkContent, i, vectorLiteral],
       )
 
       await client.query(
@@ -74,7 +85,7 @@ export async function ingestStoredFile(input: IngestInput): Promise<{ documentId
         INSERT INTO document_chunks (document_id, chunk_index, content, embedding)
         VALUES ($1, $2, $3, $4::vector)
         `,
-        [documentId, i, chunks[i], vectorLiteral],
+        [documentId, i, chunkContent, vectorLiteral],
       )
     }
 
