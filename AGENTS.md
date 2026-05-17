@@ -35,6 +35,26 @@ Before every commit, run:
 
 If any private corpus file appears in Git, stop immediately. Do not commit. Do not push.
 
+## Secrets and Environment Rule
+
+Never commit secrets. Never commit environment files.
+
+The following must never be committed to Git:
+- .env
+- .env.local
+- .env.* (except .env.example)
+- API keys, auth secrets, client secrets, access tokens
+- database connection strings with credentials
+- cloud service account JSON credentials
+- private certificates/keys
+
+Before every commit, enforce these checks:
+- git status --short
+- git ls-files | grep -E '^\.env($|\.)' && stop
+- git ls-files | grep -Ei '(secret|token|credential|service-account|private[._-]?key|auth[_-]?secret|client[_-]?secret)' && stop
+
+If any secret-like file or env file appears in Git, stop immediately. Do not commit. Do not push.
+
 ## Deployment Workflow Rule
 
 For this repository, after completing any user-requested code change, deploy using:
