@@ -37,7 +37,16 @@ type DriveCandidate = {
 
 type IngestFailure = {
   path: string
-  stage: "download" | "extract" | "embed" | "db"
+  stage:
+    | "manifest_read"
+    | "queue_selection"
+    | "download"
+    | "extract"
+    | "chunking"
+    | "embedding"
+    | "documents_insert"
+    | "document_chunks_insert"
+    | "unknown"
   reason: string
 }
 
@@ -69,6 +78,26 @@ function parseLimit(argv: string[]): number {
   }
 
   return Math.min(parsed, 200)
+}
+
+function parseExtFilter(argv: string[]): Set<string> {
+  const explicit = argv.find((arg) => arg.startsWith("--ext="))
+  const next = argv.findIndex((arg) => arg === "--ext")
+
+  let raw = ""
+  if (explicit) {
+    raw = explicit.split("=")[1] || ""
+  } else if (next >= 0 && argv[next + 1]) {
+    raw = argv[next + 1]
+  }
+
+  const values = raw
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean)
+    .map((item) => (item.startsWith(".") ? item : `.${item}`))
+
+  return new Set(values)
 }
 
 function toNumber(value: unknown): number {
@@ -332,6 +361,69 @@ async function completeJob(params: {
   )
 }
 
+async function createJobItem(params: { jobId: string; drivePath: string; fileName: string }) {
+  const result = await pool.query<{ id: string }>(
+    `
+    INSERT INTO drive_import_job_items (job_id, drive_path, file_name, status, started_at, updated_at)
+    VALUES ($1, $2, $3, 'running', NOW(), NOW())
+    RETURNING id
+    `,
+    [params.jobId, params.drivePath, params.fileName],
+  )
+
+  return result.rows[0].id
+}
+
+async function updateJobItem(
+  id: string,
+  updates: {
+    status?: "running" | "downloaded" | "indexed" | "skipped" | "failed"
+    failureStage?: string | null
+    error?: string | null
+    localPath?: string | null
+    contentHash?: string | null
+    chunkCount?: number | null
+    finished?: boolean
+  },
+) {
+  await pool.query(
+    `
+    UPDATE drive_import_job_items
+    SET
+      status = COALESCE($2, status),
+      failure_stage = COALESCE($3, failure_stage),
+      error = COALESCE($4, error),
+      local_path = COALESCE($5, local_path),
+      content_hash = COALESCE($6, content_hash),
+      chunk_count = COALESCE($7, chunk_count),
+      finished_at = CASE WHEN $8 THEN NOW() ELSE finished_at END,
+      updated_at = NOW()
+    WHERE id = $1
+    `,
+    [
+      id,
+      updates.status ?? null,
+      updates.failureStage ?? null,
+      updates.error ?? null,
+      updates.localPath ?? null,
+      updates.contentHash ?? null,
+      updates.chunkCount ?? null,
+      updates.finished ?? false,
+    ],
+  )
+}
+
+function classifyFailureStage(reason: string): IngestFailure["stage"] {
+  const lower = reason.toLowerCase()
+  if (lower.includes("rclone") || lower.includes("copyto") || lower.includes("directory not found")) return "download"
+  if (lower.includes("unsupported file type") || lower.includes("pdf parsed") || lower.includes("extract")) return "extract"
+  if (lower.includes("no chunks produced") || lower.includes("chunk")) return "chunking"
+  if (lower.includes("embedding") || lower.includes("dimension")) return "embedding"
+  if (lower.includes("insert into documents") || lower.includes("documents")) return "documents_insert"
+  if (lower.includes("document_chunks") || lower.includes("chunks")) return "document_chunks_insert"
+  return "unknown"
+}
+
 async function documentAlreadyIndexed(path: string, contentHash: string): Promise<boolean> {
   const result = await pool.query<{ id: string }>(
     `
@@ -436,7 +528,9 @@ async function insertDocumentAndChunks(input: {
 async function main() {
   loadDotenv({ path: ".env.local" })
 
-  const limit = parseLimit(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  const limit = parseLimit(argv)
+  const extFilter = parseExtFilter(argv)
   const runtime = await ensureRuntimeDirs()
 
   const allCandidates = await loadManifestCandidates()
@@ -462,15 +556,50 @@ async function main() {
   const failures: IngestFailure[] = []
 
   for (const candidate of selected) {
+    const extension = chooseDownloadExtension(candidate)
+    let itemId = ""
+
+    try {
+      itemId = await createJobItem({
+        jobId,
+        drivePath: candidate.path,
+        fileName: candidate.name,
+      })
+    } catch {
+      // Continue ingestion even if per-item audit row fails.
+    }
+
+    if (extFilter.size > 0 && !extFilter.has(extension.toLowerCase())) {
+      skippedCount += 1
+      if (itemId) {
+        await updateJobItem(itemId, {
+          status: "skipped",
+          failureStage: "queue_selection",
+          error: `Skipped by extension filter (${extension || "(none)"}).`,
+          finished: true,
+        })
+      }
+
+      continue
+    }
+
     if (candidate.sizeBytes > 0 && candidate.sizeBytes > maxFileBytes) {
       skippedCount += 1
+      if (itemId) {
+        await updateJobItem(itemId, {
+          status: "skipped",
+          failureStage: "queue_selection",
+          error: `Skipped by max file size (${candidate.sizeBytes} bytes).`,
+          finished: true,
+        })
+      }
+
       continue
     }
 
     attemptedCount += 1
 
     const fileId = randomUUID()
-    const extension = chooseDownloadExtension(candidate)
     const baseName = sanitizeFileName(candidate.name.replace(extname(candidate.name), "")) || "drive_file"
     const storedFile = `${fileId}-${baseName}${extension}`
     const importPath = join(runtime.driveImports, storedFile)
@@ -488,6 +617,13 @@ async function main() {
 
       await runCommand("rclone", args)
 
+      if (itemId) {
+        await updateJobItem(itemId, {
+          status: "downloaded",
+          localPath: importPath,
+        })
+      }
+
       const extracted = await extractTextFromFile(importPath, guessMimeByExtension(importPath, candidate.mimeType))
       const chunks = chunkText(extracted)
 
@@ -501,6 +637,18 @@ async function main() {
       const duplicate = await documentAlreadyIndexed(candidate.path, contentHash)
       if (duplicate) {
         skippedCount += 1
+        if (itemId) {
+          await updateJobItem(itemId, {
+            status: "skipped",
+            failureStage: "queue_selection",
+            localPath: importPath,
+            contentHash,
+            chunkCount: chunks.length,
+            error: "Skipped duplicate by drive_path + content_hash.",
+            finished: true,
+          })
+        }
+
         continue
       }
 
@@ -518,6 +666,16 @@ async function main() {
       })
 
       importedCount += 1
+
+      if (itemId) {
+        await updateJobItem(itemId, {
+          status: "indexed",
+          localPath: importPath,
+          contentHash,
+          chunkCount: chunks.length,
+          finished: true,
+        })
+      }
 
       const extractedMetaPath = join(runtime.driveExtracted, `${fileId}.json`)
       await writeFile(
@@ -541,17 +699,22 @@ async function main() {
       failedCount += 1
       errorCount += 1
       const reason = error instanceof Error ? error.message : "Unknown ingestion failure"
+      const stage = classifyFailureStage(reason)
       failures.push({
         path: candidate.path,
-        stage: reason.includes("rclone")
-          ? "download"
-          : reason.includes("insert") || reason.includes("documents") || reason.includes("chunks")
-            ? "db"
-            : reason.includes("extract") || reason.includes("Unsupported")
-              ? "extract"
-              : "embed",
+        stage,
         reason,
       })
+
+      if (itemId) {
+        await updateJobItem(itemId, {
+          status: "failed",
+          failureStage: stage,
+          localPath: importPath,
+          error: reason,
+          finished: true,
+        })
+      }
     }
   }
 
