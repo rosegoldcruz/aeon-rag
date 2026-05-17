@@ -40,11 +40,11 @@ function redactSnippet(input: string): string {
     return ""
   }
 
-  if (normalized.length <= 140) {
+  if (normalized.length <= 180) {
     return normalized
   }
 
-  return `${normalized.slice(0, 140)}...`
+  return `${normalized.slice(0, 180)}...`
 }
 
 async function main() {
@@ -60,6 +60,7 @@ async function main() {
 
   console.log(`Query: ${query}`)
   console.log(`Requested topK: ${topK}`)
+  console.log(`Retrieval mode: ${result.retrievalMode}`)
   console.log(`Chunks returned: ${result.sources.length}`)
 
   if (result.sources.length === 0) {
@@ -70,9 +71,14 @@ async function main() {
   for (let i = 0; i < result.sources.length; i += 1) {
     const source = result.sources[i]
     const safeName = source.documentName || "unknown"
+    const originalName = source.originalName || safeName
+    const chunkIndex = Number.isFinite(source.chunkIndex) ? source.chunkIndex : -1
+    const mode = source.mode || result.retrievalMode
     const scoreText = typeof source.score === "number" ? source.score.toFixed(4) : "n/a"
     const snippet = redactSnippet(source.content)
-    console.log(`${i + 1}. source=${safeName} score=${scoreText} snippet=${snippet}`)
+    console.log(
+      `${i + 1}. mode=${mode} source=${safeName} original_name=${originalName} chunk_index=${chunkIndex} score=${scoreText} snippet=${snippet}`,
+    )
   }
 }
 
