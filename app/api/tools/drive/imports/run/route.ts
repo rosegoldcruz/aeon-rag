@@ -12,9 +12,9 @@ export async function POST() {
   return NextResponse.json(
     {
       ok: false,
-      cliOnly: true,
-      error: "Drive ingestion is CLI-only for safety. Run: pnpm run rag:drive:ingest -- --limit 10",
+      status: "cli_only",
+      message: "Drive ingestion is currently CLI-only.",
     },
-    { status: 409 },
+    { status: 200 },
   )
 }

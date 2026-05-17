@@ -11,7 +11,7 @@ export async function GET() {
   }
 
   try {
-    const [latest, totals] = await Promise.all([
+    const [latest, totals, recentJobs, recentItems] = await Promise.all([
       pool.query<{
         id: string
         status: string
@@ -45,6 +45,62 @@ export async function GET() {
         FROM drive_import_jobs
         `,
       ),
+      pool.query<{
+        id: string
+        status: string
+        started_at: string
+        finished_at: string | null
+        scanned_count: string
+        attempted_count: string
+        imported_count: string
+        skipped_count: string
+        failed_count: string
+        message: string | null
+      }>(
+        `
+        SELECT
+          id,
+          status,
+          started_at,
+          finished_at,
+          scanned_count::text,
+          attempted_count::text,
+          imported_count::text,
+          skipped_count::text,
+          failed_count::text,
+          message
+        FROM drive_import_jobs
+        ORDER BY started_at DESC
+        LIMIT 10
+        `,
+      ),
+      pool.query<{
+        id: string
+        job_id: string
+        drive_path: string
+        file_name: string | null
+        status: string
+        failure_stage: string | null
+        error: string | null
+        chunk_count: string | null
+        updated_at: string
+      }>(
+        `
+        SELECT
+          id,
+          job_id,
+          drive_path,
+          file_name,
+          status,
+          failure_stage,
+          error,
+          chunk_count::text,
+          updated_at
+        FROM drive_import_job_items
+        ORDER BY updated_at DESC
+        LIMIT 25
+        `,
+      ),
     ])
 
     const row = totals.rows[0]
@@ -58,6 +114,18 @@ export async function GET() {
         skipped: Number(row?.skipped || "0"),
       },
       latestJob: latest.rows[0] || null,
+      recentJobs: recentJobs.rows.map((job) => ({
+        ...job,
+        scanned_count: Number(job.scanned_count || "0"),
+        attempted_count: Number(job.attempted_count || "0"),
+        imported_count: Number(job.imported_count || "0"),
+        skipped_count: Number(job.skipped_count || "0"),
+        failed_count: Number(job.failed_count || "0"),
+      })),
+      recentItems: recentItems.rows.map((item) => ({
+        ...item,
+        chunk_count: item.chunk_count === null ? null : Number(item.chunk_count),
+      })),
     })
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : "Unknown drive imports failure"

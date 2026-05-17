@@ -55,11 +55,16 @@ const DEFAULT_MAX_FILE_MB = 50
 const DEFAULT_REMOTE = ""
 const DIRECT_EXTRACTABLE_EXTENSIONS = new Set([".txt", ".md", ".markdown", ".json", ".csv", ".tsv", ".pdf"])
 
-const MANIFEST_CANDIDATES = [
+const RUNTIME_MANIFEST_CANDIDATES = [
   "/var/lib/aeonops/drive/manifests/google-drive-rag-manifest.jsonl",
   "/var/lib/aeonops/drive/manifests/google-native-docs-hunt.jsonl",
+]
+
+const LEGACY_MANIFEST_CANDIDATES = [
   "/home/aeon-rag/storage/manifests/google-drive-rag-manifest.jsonl",
 ]
+
+type ManifestSourceMode = "runtime" | "legacy" | "auto"
 
 function parseLimit(argv: string[]): number {
   const explicit = argv.find((arg) => arg.startsWith("--limit="))
@@ -98,6 +103,28 @@ function parseExtFilter(argv: string[]): Set<string> {
     .map((item) => (item.startsWith(".") ? item : `.${item}`))
 
   return new Set(values)
+}
+
+function parseDryRun(argv: string[]): boolean {
+  return argv.includes("--dry-run")
+}
+
+function parseSourceMode(argv: string[]): ManifestSourceMode {
+  const explicit = argv.find((arg) => arg.startsWith("--source="))
+  const next = argv.findIndex((arg) => arg === "--source")
+
+  let value = "auto"
+  if (explicit) {
+    value = (explicit.split("=")[1] || "auto").toLowerCase()
+  } else if (next >= 0 && argv[next + 1]) {
+    value = argv[next + 1].toLowerCase()
+  }
+
+  if (value === "runtime" || value === "legacy" || value === "auto") {
+    return value
+  }
+
+  return "auto"
 }
 
 function toNumber(value: unknown): number {
@@ -246,11 +273,23 @@ function hashText(content: string): string {
   return createHash("sha256").update(content).digest("hex")
 }
 
-async function loadManifestCandidates(): Promise<DriveCandidate[]> {
+function resolveManifestCandidates(mode: ManifestSourceMode): string[] {
+  if (mode === "runtime") {
+    return [...RUNTIME_MANIFEST_CANDIDATES]
+  }
+
+  if (mode === "legacy") {
+    return [...LEGACY_MANIFEST_CANDIDATES]
+  }
+
+  return [...RUNTIME_MANIFEST_CANDIDATES, ...LEGACY_MANIFEST_CANDIDATES]
+}
+
+async function loadManifestCandidates(mode: ManifestSourceMode): Promise<DriveCandidate[]> {
   const seen = new Set<string>()
   const candidates: DriveCandidate[] = []
 
-  for (const filePath of MANIFEST_CANDIDATES) {
+  for (const filePath of resolveManifestCandidates(mode)) {
     try {
       await access(filePath)
     } catch {
@@ -531,9 +570,11 @@ async function main() {
   const argv = process.argv.slice(2)
   const limit = parseLimit(argv)
   const extFilter = parseExtFilter(argv)
+  const sourceMode = parseSourceMode(argv)
+  const isDryRun = parseDryRun(argv)
   const runtime = await ensureRuntimeDirs()
 
-  const allCandidates = await loadManifestCandidates()
+  const allCandidates = await loadManifestCandidates(sourceMode)
   const selected = chooseCandidatesForRun(allCandidates, limit)
 
   const envRemote = process.env.GOOGLE_DRIVE_REMOTE?.trim() || DEFAULT_REMOTE
@@ -543,6 +584,24 @@ async function main() {
 
   if (!remote) {
     throw new Error("Missing required env var: GOOGLE_DRIVE_REMOTE")
+  }
+
+  if (isDryRun) {
+    let selectedByExtension = selected.length
+    if (extFilter.size > 0) {
+      selectedByExtension = selected.filter((candidate) => extFilter.has(chooseDownloadExtension(candidate).toLowerCase())).length
+    }
+
+    console.log("Dry run: no downloads, inserts, or file writes were performed.")
+    console.log(`Source mode: ${sourceMode}`)
+    console.log(`Manifest candidates loaded: ${allCandidates.length}`)
+    console.log(`Scanned (pre-limit): ${allCandidates.length}`)
+    console.log(`Selected (limit=${limit}): ${selected.length}`)
+    console.log(`Selected after ext filter: ${selectedByExtension}`)
+    if (extFilter.size > 0) {
+      console.log(`Extension filter: ${Array.from(extFilter).join(",")}`)
+    }
+    return
   }
 
   const jobId = await insertJob(remote, limit)

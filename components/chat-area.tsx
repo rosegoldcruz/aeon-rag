@@ -435,19 +435,57 @@ export function ChatArea() {
         hasRuns?: boolean
         latestStatus?: string | null
         indexedDriveDocuments?: number
+        indexedDriveChunks?: number
+        failedItemsCount?: number
+        skippedItemsCount?: number
+        topFailureStage?: string
+        lastRunTimestamp?: string | null
+      }
+
+      const runStateResponse = await fetch("/api/tools/drive/imports/run", {
+        method: "POST",
+      })
+      const runStatePayload = (await runStateResponse.json()) as {
+        ok?: boolean
+        status?: string
+        message?: string
       }
 
       const indexed = Number(drivePayload.indexedDriveDocuments || 0)
+      const chunks = Number(drivePayload.indexedDriveChunks || 0)
       const latestStatus = drivePayload.latestStatus || "none"
+      const failedItems = Number(drivePayload.failedItemsCount || 0)
+      const skippedItems = Number(drivePayload.skippedItemsCount || 0)
+      const topFailureStage = drivePayload.topFailureStage || "none"
+      const lastRunTimestamp = drivePayload.lastRunTimestamp
+        ? new Date(drivePayload.lastRunTimestamp).toLocaleString()
+        : "never"
+      const cliOnly = runStateResponse.ok && runStatePayload.status === "cli_only"
+      const cliDetail = cliOnly ? "CLI-only" : "UI run available"
+
+      const driveDetail = [
+        `Indexed Drive docs: ${indexed}`,
+        `Drive chunks: ${chunks}`,
+        `Latest import status: ${latestStatus}`,
+        `Failed items: ${failedItems}`,
+        `Skipped items: ${skippedItems}`,
+        `Top failure stage: ${topFailureStage}`,
+        `Last run: ${lastRunTimestamp}`,
+        cliDetail,
+      ].join(" | ")
+
+      if (documentsState.state === "enabled") {
+        documentsState = {
+          ...documentsState,
+          detail: driveDetail,
+        }
+      }
 
       driveImportsState = {
         key: "drive_imports",
         label: "Drive Imports",
         state: indexed > 0 || latestStatus === "success" || latestStatus === "partial" ? "enabled" : "disabled",
-        detail:
-          driveResponse.ok && drivePayload.ok
-            ? `latest=${latestStatus}, indexed=${indexed} (CLI only)`
-            : "CLI only (run rag:drive:ingest)",
+        detail: driveResponse.ok && drivePayload.ok ? `${driveDetail}` : "CLI only (run rag:drive:ingest)",
       }
     } catch {
       driveImportsState = {

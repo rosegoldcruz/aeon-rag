@@ -14,6 +14,7 @@
     "rag:drive:hunt-google-native": "tsx scripts/hunt-google-native-docs.ts",
     "rag:manifest": "tsx scripts/build-drive-manifest.ts",
     "rag:migrate": "tsx scripts/migrate-rag.ts",
+    "rag:test:retrieve": "tsx scripts/test-rag-retrieval.ts",
     "start": "next start"
   },
   "dependencies": {
