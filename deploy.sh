@@ -63,7 +63,18 @@ pm2 save
 
 echo "13) Verify..."
 pm2 list
+
+echo "Waiting for local app on port 3000..."
+for i in {1..20}; do
+  if curl -fsS -I http://127.0.0.1:3000 >/dev/null 2>&1; then
+    echo "Local app is responding."
+    break
+  fi
+  sleep 1
+done
+
 curl -I http://127.0.0.1:3000 || true
+curl -I http://aeonops.com || true
 curl -I https://aeonops.com || true
 curl -I https://www.aeonops.com || true
 curl -I https://aeonops.com/api/models || true
