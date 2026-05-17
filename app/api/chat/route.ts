@@ -27,7 +27,12 @@ type ChatRequest = {
   }
 }
 
-const DEFAULT_MODEL = process.env.VERTEX_MODEL || "gemini-2.5-flash"
+const SUPPORTED_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"] as const
+
+const configuredModel = (process.env.VERTEX_MODEL || "").trim()
+const DEFAULT_MODEL = SUPPORTED_MODELS.includes(configuredModel as (typeof SUPPORTED_MODELS)[number])
+  ? configuredModel
+  : "gemini-2.5-flash"
 const SYSTEM_PROMPT =
   "You are AEON Ops, a private operating intelligence layer for Daniel Cruz. Be direct, execution-focused, and practical. Help turn ideas into plans, system prompts, architecture, and implementation steps."
 
@@ -40,7 +45,7 @@ const MODE_INSTRUCTIONS: Record<ChatMode, string> = {
     "Return only a polished, production-ready image generation prompt based on user intent. Start with 'Image prompt:' and include style, composition, lighting, and mood.",
 }
 
-const FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"]
+const FALLBACK_MODELS = SUPPORTED_MODELS.filter((model) => model !== DEFAULT_MODEL)
 
 function isMode(value: unknown): value is ChatMode {
   return value === "chat" || value === "brainstorm" || value === "plan" || value === "image_prompt"
@@ -107,7 +112,10 @@ export async function POST(request: Request) {
 
   const message = typeof body.message === "string" ? body.message.trim() : ""
   const mode: ChatMode = isMode(body.mode) ? body.mode : "chat"
-  const model = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
+  const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
+  const model = SUPPORTED_MODELS.includes(requestedModel as (typeof SUPPORTED_MODELS)[number])
+    ? requestedModel
+    : DEFAULT_MODEL
   const sessionIdInput = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : ""
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const responseStyle = isResponseStyle(body.options?.responseStyle) ? body.options?.responseStyle : "balanced"

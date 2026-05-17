@@ -7,7 +7,6 @@ const MODELS = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
   { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
   { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
-  { id: "gemini-1.5-pro", label: "AEON / Gemini 1.5 Pro" },
 ]
 
 export const runtime = "nodejs"
@@ -47,7 +46,9 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     models: MODELS,
-    selected: process.env.VERTEX_MODEL || "gemini-2.5-flash",
+    selected: MODELS.some((item) => item.id === process.env.VERTEX_MODEL)
+      ? process.env.VERTEX_MODEL
+      : "gemini-2.5-flash",
     status: {
       vertexProjectConfigured: Boolean(process.env.GOOGLE_VERTEX_PROJECT),
       vertexLocationConfigured: Boolean(process.env.GOOGLE_VERTEX_LOCATION),
