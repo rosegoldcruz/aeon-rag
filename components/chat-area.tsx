@@ -83,6 +83,13 @@ type FailedSubmission = {
   text: string
 }
 
+type ToolPanelItem = {
+  key: "documents" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
+  label: string
+  state: "enabled" | "disabled" | "coming_soon"
+  detail: string
+}
+
 const MODEL_FALLBACK: ModelOption[] = [
   { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
   { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
@@ -160,6 +167,7 @@ export function ChatArea() {
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false)
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
@@ -182,6 +190,44 @@ export function ChatArea() {
   const [isRequestingMic, setIsRequestingMic] = useState(false)
   const [voiceMessage, setVoiceMessage] = useState("")
   const [orbState, setOrbState] = useState<OrbState>("idle")
+  const [toolPanelItems, setToolPanelItems] = useState<ToolPanelItem[]>([
+    {
+      key: "documents",
+      label: "Documents/RAG",
+      state: "disabled",
+      detail: "Checking...",
+    },
+    {
+      key: "memory",
+      label: "Memory",
+      state: "disabled",
+      detail: "Checking...",
+    },
+    {
+      key: "vision",
+      label: "Vision",
+      state: "coming_soon",
+      detail: "Coming soon",
+    },
+    {
+      key: "image_generation",
+      label: "Image Generation",
+      state: "coming_soon",
+      detail: "Coming soon",
+    },
+    {
+      key: "github",
+      label: "GitHub",
+      state: "coming_soon",
+      detail: "Coming soon",
+    },
+    {
+      key: "mcp_servers",
+      label: "MCP Servers",
+      state: "coming_soon",
+      detail: "Coming soon",
+    },
+  ])
 
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const finalTranscriptRef = useRef("")
@@ -254,6 +300,95 @@ export function ChatArea() {
     } catch {
       setUiMessage("Could not load model metadata. Using defaults.")
     }
+  }
+
+  const refreshToolsPanel = async () => {
+    let documentsState: ToolPanelItem = {
+      key: "documents",
+      label: "Documents/RAG",
+      state: "disabled",
+      detail: "Not configured",
+    }
+
+    let memoryState: ToolPanelItem = {
+      key: "memory",
+      label: "Memory",
+      state: "disabled",
+      detail: "Not configured",
+    }
+
+    try {
+      setOrbState("reading_docs")
+      const ragResponse = await fetch("/api/tools/rag/status", { cache: "no-store" })
+      const ragPayload = (await ragResponse.json()) as {
+        ok?: boolean
+        message?: string
+        error?: string
+      }
+
+      if (ragResponse.ok && ragPayload.ok) {
+        documentsState = {
+          key: "documents",
+          label: "Documents/RAG",
+          state: "enabled",
+          detail: ragPayload.message || "Enabled",
+        }
+      } else {
+        documentsState = {
+          key: "documents",
+          label: "Documents/RAG",
+          state: "disabled",
+          detail: ragPayload.error || "Not configured",
+        }
+      }
+    } catch {
+      documentsState = {
+        key: "documents",
+        label: "Documents/RAG",
+        state: "disabled",
+        detail: "Not configured",
+      }
+    }
+
+    try {
+      setOrbState("writing_memory")
+      const memoryResponse = await fetch("/api/memory?limit=1", { cache: "no-store" })
+      const memoryPayload = (await memoryResponse.json()) as {
+        ok?: boolean
+        error?: string
+      }
+
+      if (memoryResponse.ok && memoryPayload.ok) {
+        memoryState = {
+          key: "memory",
+          label: "Memory",
+          state: "enabled",
+          detail: "Enabled",
+        }
+      } else {
+        memoryState = {
+          key: "memory",
+          label: "Memory",
+          state: "disabled",
+          detail: memoryPayload.error || "Not configured",
+        }
+      }
+    } catch {
+      memoryState = {
+        key: "memory",
+        label: "Memory",
+        state: "disabled",
+        detail: "Not configured",
+      }
+    }
+
+    setToolPanelItems((prev) => [
+      documentsState,
+      memoryState,
+      ...prev.filter((item) => item.state === "coming_soon"),
+    ])
+
+    setOrbState("idle")
   }
 
   const refreshSessions = async (preferredSessionId?: string | null) => {
@@ -344,7 +479,7 @@ export function ChatArea() {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        await Promise.all([refreshModels(), refreshRagStatus()])
+        await Promise.all([refreshModels(), refreshRagStatus(), refreshToolsPanel()])
         const loadedSessions = await refreshSessions(null)
         if (loadedSessions[0]?.id) {
           await loadSessionMessages(loadedSessions[0].id)
@@ -385,6 +520,7 @@ export function ChatArea() {
       setOptionsMenuOpen(false)
       setExportDropdownOpen(false)
       setSettingsOpen(false)
+      setToolsOpen(false)
     }
 
     document.addEventListener("mousedown", onPointerDown)
@@ -1034,6 +1170,11 @@ export function ChatArea() {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button className="h-10 gap-2" onClick={() => setToolsOpen(true)}>
+                <FileText className="h-4 w-4" />
+                Tools
+              </Button>
+
               <Button className="h-10 gap-2" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
                 Configuration
@@ -1348,6 +1489,54 @@ export function ChatArea() {
           {sidebarPanel}
         </div>
       </div>
+
+      {toolsOpen && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setToolsOpen(false)} />
+          <aside className="absolute right-0 top-0 h-full w-full max-w-sm border-l border-border/40 bg-background p-4 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Tools</h2>
+              <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setToolsOpen(false)}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="mb-3 flex justify-end">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  void refreshToolsPanel()
+                }}
+              >
+                Refresh
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {toolPanelItems.map((item) => (
+                <div key={item.key} className="rounded-lg border border-border/40 bg-secondary/20 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium">{item.label}</p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] uppercase tracking-wide ${
+                        item.state === "enabled"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : item.state === "disabled"
+                            ? "bg-destructive/15 text-destructive"
+                            : "bg-secondary/60 text-muted-foreground"
+                      }`}
+                    >
+                      {item.state === "coming_soon" ? "coming soon" : item.state}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+                </div>
+              ))}
+            </div>
+          </aside>
+        </div>
+      )}
 
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import { join } from "node:path"
 import { Pool } from "pg"
 
@@ -36,15 +37,29 @@ async function run() {
     throw new Error("POSTGRES_URL is missing. Set it in environment or .env.local.")
   }
 
-  const sqlPath = join(process.cwd(), "scripts", "migrate-rag.sql")
+  const root = process.cwd()
+  const sqlPath = join(root, "scripts", "migrate-rag.sql")
   const sql = await readFile(sqlPath, "utf8")
+
+  const migrationsDir = join(root, "migrations")
+  const migrationFiles = (await readdir(migrationsDir))
+    .filter((name) => name.endsWith(".sql"))
+    .sort((a, b) => a.localeCompare(b))
 
   const pool = new Pool({ connectionString: process.env.POSTGRES_URL })
   const client = await pool.connect()
 
   try {
+    // Keep existing RAG migration behavior first, then apply numbered migrations.
     await client.query(sql)
-    console.log("RAG migration completed.")
+
+    for (const file of migrationFiles) {
+      const migrationPath = join(migrationsDir, file)
+      const migrationSql = await readFile(migrationPath, "utf8")
+      await client.query(migrationSql)
+    }
+
+    console.log(`RAG migration completed. Applied ${migrationFiles.length} migration file(s).`)
   } finally {
     client.release()
     await pool.end()

@@ -1,7 +1,7 @@
 .env
 .env.*
 !.env.example
-
+vertex-496419-e493a9fd16b9.json
 *.pem
 *.key
 *.p8

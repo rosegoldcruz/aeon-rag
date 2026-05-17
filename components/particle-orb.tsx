@@ -5,7 +5,7 @@ import { Canvas, useFrame } from "@react-three/fiber"
 import type * as THREE from "three"
 
 type OrbTier = "portrait-mobile" | "mobile-landscape-tablet" | "desktop"
-export type OrbState = "idle" | "thinking" | "listening" | "retrieving" | "error"
+export type OrbState = "idle" | "thinking" | "listening" | "retrieving" | "reading_docs" | "writing_memory" | "error"
 
 type OrbConfig = {
   radius: number
@@ -91,6 +91,20 @@ const ORB_VISUALS: Record<OrbState, OrbVisualState> = {
     glowClass: "from-amber-300/30 via-amber-100/10",
     pulseMultiplier: 1.25,
     rotationMultiplier: 1.3,
+  },
+  reading_docs: {
+    dotColor: "#dbeafe",
+    dotEmissive: "#60a5fa",
+    glowClass: "from-blue-300/30 via-blue-100/10",
+    pulseMultiplier: 1.25,
+    rotationMultiplier: 1.35,
+  },
+  writing_memory: {
+    dotColor: "#ede9fe",
+    dotEmissive: "#8b5cf6",
+    glowClass: "from-violet-300/30 via-violet-100/10",
+    pulseMultiplier: 1.15,
+    rotationMultiplier: 1.2,
   },
   error: {
     dotColor: "#fecaca",
