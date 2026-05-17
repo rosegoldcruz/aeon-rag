@@ -50,3 +50,5 @@ storage/uploads/
 *.jsonl
 *.tsv
 -ef*
+ops/archive/
+bootstrap-aeonops*.sh
