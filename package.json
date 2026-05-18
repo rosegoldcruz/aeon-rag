@@ -12,6 +12,7 @@
     "ops:self-heal:loop": "bash scripts/self-heal-loop.sh",
     "rag:drive:ingest": "tsx scripts/ingest-drive-rag.ts",
     "rag:drive:ingest:targeted": "tsx scripts/ingest-drive-rag.ts",
+    "rag:drive:worker": "tsx scripts/drive-ingest-worker.ts",
     "rag:drive:hunt-google-native": "tsx scripts/hunt-google-native-docs.ts",
     "rag:manifest": "tsx scripts/build-drive-manifest.ts",
     "rag:migrate": "tsx scripts/migrate-rag.ts",

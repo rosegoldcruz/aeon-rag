@@ -1,6 +1,8 @@
 import pool from "@/lib/db"
 import { getDocumentToolStatus } from "@/lib/tools/document-tool"
 import { getRuntimeStoragePaths, type ToolRegistryEntry } from "@/lib/tools/types"
+import { readFile } from "node:fs/promises"
+import { join } from "node:path"
 
 async function isMemoryToolEnabled() {
   try {
@@ -56,6 +58,30 @@ async function getDriveImportsState() {
   }
 }
 
+async function getDriveWorkerState(runtimePaths: ReturnType<typeof getRuntimeStoragePaths>) {
+  try {
+    const statusPath = join(runtimePaths.toolRuns, "drive-worker-status.json")
+    const parsed = JSON.parse(await readFile(statusPath, "utf8")) as {
+      status?: string
+      folder?: string
+      lastJob?: { id?: string; importedCount?: number; failedCount?: number } | null
+    }
+
+    const enabled = parsed.status === "idle" || parsed.status === "running" || parsed.status === "skipped"
+    const job = parsed.lastJob
+
+    return {
+      enabled,
+      message: `status=${parsed.status || "unknown"}, folder=${parsed.folder || "unknown"}, job=${job?.id || "none"}, imported=${job?.importedCount ?? 0}, failed=${job?.failedCount ?? 0}`,
+    }
+  } catch {
+    return {
+      enabled: false,
+      message: "Drive worker has not written status yet.",
+    }
+  }
+}
+
 export async function getToolRegistry(): Promise<{
   runtimePaths: ReturnType<typeof getRuntimeStoragePaths>
   tools: ToolRegistryEntry[]
@@ -76,6 +102,7 @@ export async function getToolRegistry(): Promise<{
 
   const memoryEnabled = await isMemoryToolEnabled()
   const driveImports = await getDriveImportsState()
+  const driveWorker = await getDriveWorkerState(runtimePaths)
 
   return {
     runtimePaths,
@@ -95,6 +122,14 @@ export async function getToolRegistry(): Promise<{
         status: driveImports.enabled ? "enabled" : "disabled",
         configured: driveImports.enabled,
         message: driveImports.message,
+      },
+      {
+        name: "drive_worker",
+        type: "drive_worker",
+        label: "Drive Worker",
+        status: driveWorker.enabled ? "enabled" : "disabled",
+        configured: driveWorker.enabled,
+        message: driveWorker.message,
       },
       {
         name: "memory",

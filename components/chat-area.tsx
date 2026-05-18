@@ -92,7 +92,7 @@ type FailedSubmission = {
 }
 
 type ToolPanelItem = {
-  key: "documents" | "drive_imports" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
+  key: "documents" | "drive_imports" | "drive_worker" | "memory" | "vision" | "image_generation" | "github" | "mcp_servers"
   label: string
   state: "enabled" | "disabled" | "coming_soon"
   detail: string
@@ -231,6 +231,12 @@ export function ChatArea() {
       detail: "CLI only (run rag:drive:ingest)",
     },
     {
+      key: "drive_worker",
+      label: "Drive Worker",
+      state: "disabled",
+      detail: "CLI/PM2 controlled",
+    },
+    {
       key: "memory",
       label: "Memory",
       state: "disabled",
@@ -362,6 +368,13 @@ export function ChatArea() {
       detail: "CLI only (run rag:drive:ingest)",
     }
 
+    let driveWorkerState: ToolPanelItem = {
+      key: "drive_worker",
+      label: "Drive Worker",
+      state: "disabled",
+      detail: "CLI/PM2 controlled",
+    }
+
     try {
       setOrbState("reading_docs")
       const ragResponse = await fetch("/api/tools/rag/status", { cache: "no-store" })
@@ -487,6 +500,56 @@ export function ChatArea() {
         state: indexed > 0 || latestStatus === "success" || latestStatus === "partial" ? "enabled" : "disabled",
         detail: driveResponse.ok && drivePayload.ok ? `${driveDetail}` : "CLI only (run rag:drive:ingest)",
       }
+
+      const workerResponse = await fetch("/api/tools/drive/worker/status", { cache: "no-store" })
+      const workerPayload = (await workerResponse.json()) as {
+        ok?: boolean
+        worker?: {
+          status?: string
+          enabled?: boolean
+          folder?: string
+          lastFinishedAt?: string
+          message?: string
+          lastJob?: {
+            id?: string
+            importedCount?: number
+            skippedCount?: number
+            failedCount?: number
+          } | null
+        } | null
+        latestJob?: {
+          id?: string
+          imported_count?: number
+          skipped_count?: number
+          failed_count?: number
+        } | null
+      }
+
+      const worker = workerPayload.worker
+      const workerStatus = worker?.status || "unknown"
+      const workerFolder = worker?.folder || "aeondial-crm"
+      const lastWorkerRun = worker?.lastFinishedAt ? new Date(worker.lastFinishedAt).toLocaleString() : "never"
+      const workerJobId = worker?.lastJob?.id || workerPayload.latestJob?.id || "none"
+      const workerImported = worker?.lastJob?.importedCount ?? workerPayload.latestJob?.imported_count ?? 0
+      const workerSkipped = worker?.lastJob?.skippedCount ?? workerPayload.latestJob?.skipped_count ?? 0
+      const workerFailed = worker?.lastJob?.failedCount ?? workerPayload.latestJob?.failed_count ?? 0
+      const workerDetail = [
+        `Status: ${workerStatus}`,
+        `Folder: ${workerFolder}`,
+        `Last run: ${lastWorkerRun}`,
+        `Last job: ${workerJobId}`,
+        `Imported: ${workerImported}`,
+        `Skipped: ${workerSkipped}`,
+        `Failed: ${workerFailed}`,
+        "CLI/PM2 controlled",
+      ].join(" | ")
+
+      driveWorkerState = {
+        key: "drive_worker",
+        label: "Drive Worker",
+        state: workerResponse.ok && workerPayload.ok && (workerStatus === "running" || workerStatus === "idle") ? "enabled" : "disabled",
+        detail: workerResponse.ok && workerPayload.ok ? workerDetail : "CLI/PM2 controlled",
+      }
     } catch {
       driveImportsState = {
         key: "drive_imports",
@@ -494,11 +557,18 @@ export function ChatArea() {
         state: "disabled",
         detail: "CLI only (run rag:drive:ingest)",
       }
+      driveWorkerState = {
+        key: "drive_worker",
+        label: "Drive Worker",
+        state: "disabled",
+        detail: "CLI/PM2 controlled",
+      }
     }
 
     setToolPanelItems((prev) => [
       documentsState,
       driveImportsState,
+      driveWorkerState,
       memoryState,
       ...prev.filter((item) => item.state === "coming_soon"),
     ])

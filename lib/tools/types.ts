@@ -3,6 +3,7 @@ export type ToolStatus = "enabled" | "disabled" | "coming_soon"
 export type ToolType =
   | "documents_rag"
   | "drive_imports"
+  | "drive_worker"
   | "memory"
   | "vision"
   | "image_generation"
