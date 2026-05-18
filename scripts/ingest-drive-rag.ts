@@ -109,6 +109,49 @@ function parseDryRun(argv: string[]): boolean {
   return argv.includes("--dry-run")
 }
 
+function parseListFolders(argv: string[]): boolean {
+  return argv.includes("--list-folders")
+}
+
+function parseFolderFilters(argv: string[]): string[] {
+  const values: string[] = []
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+
+    if (arg.startsWith("--folder=")) {
+      values.push(arg.slice("--folder=".length))
+      continue
+    }
+
+    if (arg === "--folder" && argv[i + 1]) {
+      values.push(argv[i + 1])
+      i += 1
+      continue
+    }
+  }
+
+  const seen = new Set<string>()
+  const normalized: string[] = []
+
+  for (const raw of values) {
+    const candidate = normalizeDrivePath(raw.trim()).replace(/\/+$/, "")
+    if (!candidate) {
+      continue
+    }
+
+    const key = candidate.toLowerCase()
+    if (seen.has(key)) {
+      continue
+    }
+
+    seen.add(key)
+    normalized.push(candidate)
+  }
+
+  return normalized
+}
+
 function parseSourceMode(argv: string[]): ManifestSourceMode {
   const explicit = argv.find((arg) => arg.startsWith("--source="))
   const next = argv.findIndex((arg) => arg === "--source")
@@ -337,6 +380,40 @@ function chooseCandidatesForRun(candidates: DriveCandidate[], limit: number): Dr
   }
 
   return [...preferred, ...fallback].slice(0, limit)
+}
+
+function matchesFolderPrefix(pathValue: string, folderPrefix: string): boolean {
+  const normalizedPath = normalizeDrivePath(pathValue).toLowerCase()
+  const normalizedPrefix = normalizeDrivePath(folderPrefix).replace(/\/+$/, "").toLowerCase()
+
+  if (!normalizedPrefix) {
+    return true
+  }
+
+  return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`)
+}
+
+function filterCandidatesByFolders(candidates: DriveCandidate[], folderFilters: string[]): DriveCandidate[] {
+  if (folderFilters.length === 0) {
+    return candidates
+  }
+
+  return candidates.filter((candidate) => folderFilters.some((folderPrefix) => matchesFolderPrefix(candidate.path, folderPrefix)))
+}
+
+function listTopFolders(candidates: DriveCandidate[], topN = 50): Array<{ folder: string; count: number }> {
+  const counts = new Map<string, number>()
+
+  for (const candidate of candidates) {
+    const normalized = normalizeDrivePath(candidate.path)
+    const top = normalized.includes("/") ? normalized.split("/", 1)[0] : "(root)"
+    counts.set(top, (counts.get(top) ?? 0) + 1)
+  }
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, topN)
+    .map(([folder, count]) => ({ folder, count }))
 }
 
 async function ensureRuntimeDirs() {
@@ -572,10 +649,29 @@ async function main() {
   const extFilter = parseExtFilter(argv)
   const sourceMode = parseSourceMode(argv)
   const isDryRun = parseDryRun(argv)
+  const isListFolders = parseListFolders(argv)
+  const folderFilters = parseFolderFilters(argv)
   const runtime = await ensureRuntimeDirs()
 
   const allCandidates = await loadManifestCandidates(sourceMode)
-  const selected = chooseCandidatesForRun(allCandidates, limit)
+  const folderFilteredCandidates = filterCandidatesByFolders(allCandidates, folderFilters)
+  const selected = chooseCandidatesForRun(folderFilteredCandidates, limit)
+
+  if (isListFolders) {
+    const top = listTopFolders(folderFilteredCandidates)
+    console.log("Folder list mode: no downloads, inserts, or file writes were performed.")
+    console.log(`Source mode: ${sourceMode}`)
+    console.log(`Manifest candidates loaded: ${allCandidates.length}`)
+    if (folderFilters.length > 0) {
+      console.log(`Folder filter: ${folderFilters.join(" | ")}`)
+      console.log(`Candidates after folder filter: ${folderFilteredCandidates.length}`)
+    }
+    console.log("Top folders:")
+    for (const entry of top) {
+      console.log(`${entry.count} ${entry.folder}`)
+    }
+    return
+  }
 
   const envRemote = process.env.GOOGLE_DRIVE_REMOTE?.trim() || DEFAULT_REMOTE
   const maxFileMb = Number.parseInt(process.env.BULK_IMPORT_MAX_FILE_MB || String(DEFAULT_MAX_FILE_MB), 10)
@@ -595,7 +691,12 @@ async function main() {
     console.log("Dry run: no downloads, inserts, or file writes were performed.")
     console.log(`Source mode: ${sourceMode}`)
     console.log(`Manifest candidates loaded: ${allCandidates.length}`)
-    console.log(`Scanned (pre-limit): ${allCandidates.length}`)
+    if (folderFilters.length > 0) {
+      console.log(`Folder filter: ${folderFilters.join(" | ")}`)
+      console.log(`Scanned (post-folder-filter, pre-limit): ${folderFilteredCandidates.length}`)
+    } else {
+      console.log(`Scanned (pre-limit): ${allCandidates.length}`)
+    }
     console.log(`Selected (limit=${limit}): ${selected.length}`)
     console.log(`Selected after ext filter: ${selectedByExtension}`)
     if (extFilter.size > 0) {
@@ -780,7 +881,8 @@ async function main() {
   const status: "success" | "partial" | "error" =
     failedCount === 0 ? "success" : importedCount > 0 || skippedCount > 0 ? "partial" : "error"
 
-  const message = `scanned=${selected.length} attempted=${attemptedCount} imported=${importedCount} skipped=${skippedCount} failed=${failedCount}`
+  const folderMessage = folderFilters.length > 0 ? folderFilters.join("|") : "(all)"
+  const message = `folders=${folderMessage} scanned=${selected.length} attempted=${attemptedCount} imported=${importedCount} skipped=${skippedCount} failed=${failedCount}`
 
   await completeJob({
     id: jobId,
@@ -801,6 +903,7 @@ async function main() {
 
   console.log(`Job: ${jobId}`)
   console.log(`Status: ${status}`)
+  console.log(`Folders: ${folderFilters.length > 0 ? folderFilters.join(" | ") : "(all)"}`)
   console.log(`Scanned: ${selected.length}`)
   console.log(`Attempted: ${attemptedCount}`)
   console.log(`Imported: ${importedCount}`)
