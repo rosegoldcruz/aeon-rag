@@ -4,9 +4,9 @@ import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { getRagStats } from "@/lib/rag/db"
 
 const MODELS = [
-  { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
-  { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
-  { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
+  { id: "gemini-2.5-flash", label: "AEON Core" },
+  { id: "gemini-2.5-pro", label: "AEON Deep Focus" },
+  { id: "gemini-2.0-flash", label: "AEON Swift" },
 ]
 
 export const runtime = "nodejs"

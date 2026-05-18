@@ -99,9 +99,9 @@ type ToolPanelItem = {
 }
 
 const MODEL_FALLBACK: ModelOption[] = [
-  { id: "gemini-2.5-flash", label: "AEON / Gemini 2.5 Flash" },
-  { id: "gemini-2.5-pro", label: "AEON / Gemini 2.5 Pro" },
-  { id: "gemini-2.0-flash", label: "AEON / Gemini 2.0 Flash" },
+  { id: "gemini-2.5-flash", label: "AEON Core" },
+  { id: "gemini-2.5-pro", label: "AEON Deep Focus" },
+  { id: "gemini-2.0-flash", label: "AEON Swift" },
 ]
 
 const MODE_LABEL: Record<ChatMode, string> = {
@@ -169,6 +169,10 @@ function getInitials(input: string) {
   }
 
   return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
+}
+
+function getAeonModelLabel(modelId: string) {
+  return MODEL_FALLBACK.find((item) => item.id === modelId)?.label || "AEON Core"
 }
 
 export function ChatArea() {
@@ -279,7 +283,7 @@ export function ChatArea() {
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
 
   const selectedModelLabel = useMemo(() => {
-    return models.find((item) => item.id === selectedModel)?.label || selectedModel
+    return models.find((item) => item.id === selectedModel)?.label || getAeonModelLabel(selectedModel)
   }, [models, selectedModel])
 
   const profileName = session?.user?.name?.trim() || "ZITADEL User"
@@ -1555,7 +1559,7 @@ export function ChatArea() {
                     <span>Mode: {MODE_LABEL[activeMode]}</span>
                     <span>·</span>
                     <label className="flex items-center gap-2">
-                      <span>Model</span>
+                      <span>AEON Engine</span>
                       <select
                         value={selectedModel}
                         onChange={(event) => setSelectedModel(event.target.value)}
@@ -1792,7 +1796,7 @@ export function ChatArea() {
 
             <div className="space-y-3 text-sm">
               <p>
-                <span className="font-semibold">Current model:</span> {selectedModelLabel}
+                <span className="font-semibold">Current AEON engine:</span> {selectedModelLabel}
               </p>
               <p>
                 <span className="font-semibold">RAG indexed docs:</span> {ragStatus.indexedDocuments}
