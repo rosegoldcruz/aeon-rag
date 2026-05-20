@@ -64,6 +64,7 @@ async function getDriveWorkerState(runtimePaths: ReturnType<typeof getRuntimeSto
     const parsed = JSON.parse(await readFile(statusPath, "utf8")) as {
       status?: string
       folder?: string
+      folderId?: string | null
       lastJob?: { id?: string; importedCount?: number; failedCount?: number } | null
     }
 
@@ -72,7 +73,7 @@ async function getDriveWorkerState(runtimePaths: ReturnType<typeof getRuntimeSto
 
     return {
       enabled,
-      message: `status=${parsed.status || "unknown"}, folder=${parsed.folder || "unknown"}, job=${job?.id || "none"}, imported=${job?.importedCount ?? 0}, failed=${job?.failedCount ?? 0}`,
+      message: `status=${parsed.status || "unknown"}, folder=${parsed.folder || "unknown"}, folderId=${parsed.folderId || "unknown"}, job=${job?.id || "none"}, imported=${job?.importedCount ?? 0}, failed=${job?.failedCount ?? 0}`,
     }
   } catch {
     return {

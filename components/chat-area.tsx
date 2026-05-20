@@ -513,6 +513,7 @@ export function ChatArea() {
           status?: string
           enabled?: boolean
           folder?: string
+          folderId?: string | null
           lastFinishedAt?: string
           message?: string
           lastJob?: {
@@ -532,7 +533,8 @@ export function ChatArea() {
 
       const worker = workerPayload.worker
       const workerStatus = worker?.status || "unknown"
-      const workerFolder = worker?.folder || "aeondial-crm"
+      const workerFolder = worker?.folder || "unknown"
+      const workerFolderId = worker?.folderId || "unknown"
       const lastWorkerRun = worker?.lastFinishedAt ? new Date(worker.lastFinishedAt).toLocaleString() : "never"
       const workerJobId = worker?.lastJob?.id || workerPayload.latestJob?.id || "none"
       const workerImported = worker?.lastJob?.importedCount ?? workerPayload.latestJob?.imported_count ?? 0
@@ -541,6 +543,7 @@ export function ChatArea() {
       const workerDetail = [
         `Status: ${workerStatus}`,
         `Folder: ${workerFolder}`,
+        `Folder ID: ${workerFolderId}`,
         `Last run: ${lastWorkerRun}`,
         `Last job: ${workerJobId}`,
         `Imported: ${workerImported}`,

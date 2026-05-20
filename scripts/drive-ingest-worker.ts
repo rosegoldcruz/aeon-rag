@@ -29,6 +29,7 @@ type WorkerStatus = {
   status: WorkerState
   enabled: boolean
   folder: string
+  folderId: string | null
   limit: number
   intervalSeconds: number
   ext: string
@@ -46,7 +47,7 @@ type WorkerStatus = {
   message?: string
 }
 
-const DEFAULT_FOLDER = "aeondial-crm"
+const DEFAULT_FOLDER = "AEON_Master_Intake"
 const DEFAULT_LIMIT = 200
 const DEFAULT_INTERVAL_SECONDS = 300
 const DEFAULT_EXT = ".txt,.md,.json,.ts,.tsx,.py,.js,.pdf"
@@ -200,21 +201,20 @@ async function writeStatus(statusPath: string, status: WorkerStatus) {
 
 async function runIngest(params: {
   folder: string
+  folderId: string | null
   limit: number
   ext: string
   logPath: string
 }): Promise<number | null> {
-  const args = [
-    "run",
-    "rag:drive:ingest",
-    "--",
-    "--limit",
-    String(params.limit),
-    "--folder",
-    params.folder,
-    "--ext",
-    params.ext,
-  ]
+  const args = ["run", "rag:drive:ingest", "--", "--limit", String(params.limit)]
+
+  if (params.folderId) {
+    args.push("--folder-id", params.folderId)
+  } else {
+    args.push("--folder", params.folder)
+  }
+
+  args.push("--ext", params.ext)
 
   await appendLog(params.logPath, `starting pnpm ${args.join(" ")}`)
 
@@ -256,6 +256,7 @@ async function main() {
   const enabled = parseBoolean(process.env.DRIVE_WORKER_ENABLED, false)
   const once = parseBoolean(process.env.DRIVE_WORKER_ONCE, false)
   const folder = process.env.DRIVE_WORKER_FOLDER?.trim() || DEFAULT_FOLDER
+  const folderId = process.env.DRIVE_WORKER_FOLDER_ID?.trim() || null
   const limit = parsePositiveInteger(process.env.DRIVE_WORKER_LIMIT, DEFAULT_LIMIT)
   const intervalSeconds = parsePositiveInteger(process.env.DRIVE_WORKER_INTERVAL_SECONDS, DEFAULT_INTERVAL_SECONDS)
   const ext = process.env.DRIVE_WORKER_EXT?.trim() || DEFAULT_EXT
@@ -265,6 +266,7 @@ async function main() {
     workerId,
     enabled,
     folder,
+    folderId,
     limit,
     intervalSeconds,
     ext,
@@ -277,7 +279,7 @@ async function main() {
 
   if (!enabled) {
     const latest = await latestJob()
-    await appendLog(logPath, "Drive worker disabled; exiting cleanly")
+    await appendLog(logPath, `Drive worker disabled; exiting cleanly folder=${folder} folderId=${folderId || "none"}`)
     await writeStatus(statusPath, {
       ...baseStatus,
       status: "disabled",
@@ -288,7 +290,10 @@ async function main() {
     return
   }
 
-  await appendLog(logPath, `Drive worker enabled folder=${folder} limit=${limit} interval=${intervalSeconds}s once=${once}`)
+  await appendLog(
+    logPath,
+    `Drive worker enabled folder=${folder} folderId=${folderId || "none"} limit=${limit} interval=${intervalSeconds}s once=${once}`,
+  )
 
   do {
     const cycleStartedAt = new Date().toISOString()
@@ -319,7 +324,7 @@ async function main() {
       let lastError: string | null = null
 
       try {
-        exitCode = await runIngest({ folder, limit, ext, logPath })
+        exitCode = await runIngest({ folder, folderId, limit, ext, logPath })
         await appendLog(logPath, `ingest exited code=${exitCode}`)
       } catch (error) {
         lastError = error instanceof Error ? error.message : "Unknown worker failure"

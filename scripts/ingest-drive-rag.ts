@@ -35,6 +35,15 @@ type DriveCandidate = {
   sourceFileId: string | null
 }
 
+type RcloneEntry = {
+  Path?: string
+  Name?: string
+  Size?: number
+  MimeType?: string
+  ModTime?: string
+  ID?: string
+}
+
 type IngestFailure = {
   path: string
   stage:
@@ -152,6 +161,21 @@ function parseFolderFilters(argv: string[]): string[] {
   return normalized
 }
 
+function parseFolderId(argv: string[]): string | null {
+  const explicit = argv.find((arg) => arg.startsWith("--folder-id="))
+  const next = argv.findIndex((arg) => arg === "--folder-id")
+
+  let value = ""
+  if (explicit) {
+    value = explicit.slice("--folder-id=".length)
+  } else if (next >= 0 && argv[next + 1]) {
+    value = argv[next + 1]
+  }
+
+  const normalized = value.trim()
+  return normalized.length > 0 ? normalized : null
+}
+
 function parseSourceMode(argv: string[]): ManifestSourceMode {
   const explicit = argv.find((arg) => arg.startsWith("--source="))
   const next = argv.findIndex((arg) => arg === "--source")
@@ -259,6 +283,70 @@ async function runCommand(command: string, args: string[]): Promise<void> {
       reject(new Error(`${command} ${args.join(" ")} failed with exit code ${code}: ${stderr.trim()}`))
     })
   })
+}
+
+function normalizeRemoteForRclone(remote: string): string {
+  return remote.trim().endsWith(":") ? remote.trim() : `${remote.trim()}:`
+}
+
+async function runRcloneLsjsonForFolderId(remote: string, folderId: string): Promise<DriveCandidate[]> {
+  const source = normalizeRemoteForRclone(remote)
+  const args = ["lsjson", source, "--recursive", "--files-only", "--drive-root-folder-id", folderId]
+
+  const stdout = await new Promise<string>((resolve, reject) => {
+    const child = spawn("rclone", args, {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+
+    let out = ""
+    let err = ""
+
+    child.stdout.setEncoding("utf8")
+    child.stderr.setEncoding("utf8")
+
+    child.stdout.on("data", (chunk: string) => {
+      out += chunk
+    })
+
+    child.stderr.on("data", (chunk: string) => {
+      err += chunk
+    })
+
+    child.on("error", (error) => reject(error))
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(out)
+        return
+      }
+
+      reject(new Error(`rclone ${args.join(" ")} failed with exit code ${code}: ${err.trim()}`))
+    })
+  })
+
+  const rows = JSON.parse(stdout) as RcloneEntry[]
+
+  return rows
+    .map<DriveCandidate | null>((row) => {
+      const path = normalizeDrivePath(String(row.Path || ""))
+      if (!path) {
+        return null
+      }
+
+      return {
+        path,
+        name: String(row.Name || basename(path)),
+        remote,
+        include: true,
+        sizeBytes: Number.isFinite(Number(row.Size || 0)) ? Math.max(0, Math.trunc(Number(row.Size || 0))) : 0,
+        mimeType: row.MimeType ? String(row.MimeType) : null,
+        modifiedTime: row.ModTime ? String(row.ModTime) : null,
+        recommendedExport: null,
+        sourceFileId: row.ID ? String(row.ID) : null,
+      }
+    })
+    .filter((candidate): candidate is DriveCandidate => candidate !== null)
 }
 
 function guessMimeByExtension(fileName: string, fallbackMime: string | null): string | undefined {
@@ -651,16 +739,27 @@ async function main() {
   const isDryRun = parseDryRun(argv)
   const isListFolders = parseListFolders(argv)
   const folderFilters = parseFolderFilters(argv)
+  const folderId = parseFolderId(argv)
   const runtime = await ensureRuntimeDirs()
 
-  const allCandidates = await loadManifestCandidates(sourceMode)
+  const envRemote = process.env.GOOGLE_DRIVE_REMOTE?.trim() || DEFAULT_REMOTE
+  if (!envRemote) {
+    throw new Error("Missing required env var: GOOGLE_DRIVE_REMOTE")
+  }
+
+  const allCandidates = folderId
+    ? await runRcloneLsjsonForFolderId(envRemote, folderId)
+    : await loadManifestCandidates(sourceMode)
   const folderFilteredCandidates = filterCandidatesByFolders(allCandidates, folderFilters)
   const selected = chooseCandidatesForRun(folderFilteredCandidates, limit)
 
   if (isListFolders) {
     const top = listTopFolders(folderFilteredCandidates)
     console.log("Folder list mode: no downloads, inserts, or file writes were performed.")
-    console.log(`Source mode: ${sourceMode}`)
+    console.log(`Source mode: ${folderId ? "folder-id" : sourceMode}`)
+    if (folderId) {
+      console.log(`Folder ID root: ${folderId}`)
+    }
     console.log(`Manifest candidates loaded: ${allCandidates.length}`)
     if (folderFilters.length > 0) {
       console.log(`Folder filter: ${folderFilters.join(" | ")}`)
@@ -673,14 +772,9 @@ async function main() {
     return
   }
 
-  const envRemote = process.env.GOOGLE_DRIVE_REMOTE?.trim() || DEFAULT_REMOTE
   const maxFileMb = Number.parseInt(process.env.BULK_IMPORT_MAX_FILE_MB || String(DEFAULT_MAX_FILE_MB), 10)
   const maxFileBytes = (Number.isFinite(maxFileMb) && maxFileMb > 0 ? maxFileMb : DEFAULT_MAX_FILE_MB) * 1024 * 1024
   const remote = selected[0]?.remote || envRemote
-
-  if (!remote) {
-    throw new Error("Missing required env var: GOOGLE_DRIVE_REMOTE")
-  }
 
   if (isDryRun) {
     let selectedByExtension = selected.length
@@ -689,7 +783,10 @@ async function main() {
     }
 
     console.log("Dry run: no downloads, inserts, or file writes were performed.")
-    console.log(`Source mode: ${sourceMode}`)
+    console.log(`Source mode: ${folderId ? "folder-id" : sourceMode}`)
+    if (folderId) {
+      console.log(`Folder ID root: ${folderId}`)
+    }
     console.log(`Manifest candidates loaded: ${allCandidates.length}`)
     if (folderFilters.length > 0) {
       console.log(`Folder filter: ${folderFilters.join(" | ")}`)
@@ -771,6 +868,9 @@ async function main() {
       const isGoogleNative = !extname(candidate.name) || (candidate.mimeType || "").includes("application/vnd.google-apps")
 
       const args = ["copyto", sourcePath, importPath]
+      if (folderId) {
+        args.push("--drive-root-folder-id", folderId)
+      }
       if (isGoogleNative) {
         args.push("--drive-export-formats", exportFormats)
       }
@@ -881,7 +981,11 @@ async function main() {
   const status: "success" | "partial" | "error" =
     failedCount === 0 ? "success" : importedCount > 0 || skippedCount > 0 ? "partial" : "error"
 
-  const folderMessage = folderFilters.length > 0 ? folderFilters.join("|") : "(all)"
+  const folderMessage = folderId
+    ? `id:${folderId}${folderFilters.length > 0 ? `|${folderFilters.join("|")}` : ""}`
+    : folderFilters.length > 0
+      ? folderFilters.join("|")
+      : "(all)"
   const message = `folders=${folderMessage} scanned=${selected.length} attempted=${attemptedCount} imported=${importedCount} skipped=${skippedCount} failed=${failedCount}`
 
   await completeJob({
@@ -903,6 +1007,9 @@ async function main() {
 
   console.log(`Job: ${jobId}`)
   console.log(`Status: ${status}`)
+  if (folderId) {
+    console.log(`Folder ID root: ${folderId}`)
+  }
   console.log(`Folders: ${folderFilters.length > 0 ? folderFilters.join(" | ") : "(all)"}`)
   console.log(`Scanned: ${selected.length}`)
   console.log(`Attempted: ${attemptedCount}`)

@@ -48,8 +48,9 @@ module.exports = {
       kill_timeout: 15000,
       env: {
         NODE_ENV: "production",
-        DRIVE_WORKER_ENABLED: "false",
-        DRIVE_WORKER_FOLDER: "aeondial-crm",
+        DRIVE_WORKER_ENABLED: "true",
+        DRIVE_WORKER_FOLDER: "AEON_Master_Intake",
+        DRIVE_WORKER_FOLDER_ID: "1UxcB_zept-UQVgPcN9DHPwkur6jAN6B4",
         DRIVE_WORKER_LIMIT: "200",
         DRIVE_WORKER_INTERVAL_SECONDS: "300",
         DRIVE_WORKER_EXT: ".txt,.md,.json,.ts,.tsx,.py,.js,.pdf",
