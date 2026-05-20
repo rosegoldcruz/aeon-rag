@@ -221,7 +221,7 @@ function Scene({ config, visual }: { config: OrbConfig; visual: OrbVisualState }
   )
 }
 
-export function ParticleOrb({ state = "idle" }: { state?: OrbState }) {
+export function ParticleOrb({ state = "idle", className = "" }: { state?: OrbState; className?: string }) {
   const [tier, setTier] = useState<OrbTier>("desktop")
 
   useEffect(() => {
@@ -253,7 +253,9 @@ export function ParticleOrb({ state = "idle" }: { state?: OrbState }) {
   const visual = ORB_VISUALS[state]
 
   return (
-    <div className="relative mx-auto h-32 w-32 overflow-visible sm:h-40 sm:w-40 md:h-56 md:w-56 lg:h-72 lg:w-72">
+    <div
+      className={`relative mx-auto h-24 w-24 overflow-visible sm:h-28 sm:w-28 md:h-40 md:w-40 lg:h-44 lg:w-44 ${className}`.trim()}
+    >
       {/* Outer glow effect */}
       <div className={`${config.glowClass} bg-gradient-radial ${visual.glowClass} to-transparent`} />
       <Canvas

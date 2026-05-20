@@ -281,6 +281,7 @@ export function ChatArea() {
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null)
   const optionsMenuRef = useRef<HTMLDivElement | null>(null)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const threadEndRef = useRef<HTMLLIElement | null>(null)
 
   const selectedModelLabel = useMemo(() => {
     return models.find((item) => item.id === selectedModel)?.label || getAeonModelLabel(selectedModel)
@@ -771,6 +772,10 @@ export function ChatArea() {
     }
   }, [activeSessionId])
 
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [messages, isLoading])
+
   const stopListening = (discardTranscript: boolean) => {
     if (discardTranscript) {
       setInputMessage(baseInputRef.current)
@@ -1103,26 +1108,11 @@ export function ChatArea() {
     }
   }
 
-  const handleQuickAction = async (mode: ChatMode) => {
-    setActiveMode(mode)
-
-    const trimmed = inputMessage.trim()
-
-    if (!trimmed) {
-      if (mode === "image_prompt") {
-        setInputMessage("Create an image prompt for...")
-      } else if (mode === "brainstorm") {
-        setInputMessage("Brainstorm ideas for...")
-      } else if (mode === "plan") {
-        setInputMessage("Make a plan for...")
-      }
-
-      composerInputRef.current?.focus()
-      setUiMessage("Prompt starter inserted. Edit it and send.")
-      return
-    }
-
-    await submitChat(mode, inputMessage)
+  const handleQuickAction = (prompt: string) => {
+    setActiveMode("chat")
+    setInputMessage(prompt)
+    composerInputRef.current?.focus()
+    setUiMessage("Prompt starter inserted. Edit if needed, then send.")
   }
 
   const removeAttachment = (id: string) => {
@@ -1230,7 +1220,7 @@ export function ChatArea() {
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold">AEON Ops</p>
-              {!sidebarCollapsed && <p className="text-xs text-muted-foreground">Private Agent Workspace</p>}
+              {!sidebarCollapsed && <p className="text-xs text-muted-foreground">Private Workspace</p>}
             </div>
             <Button
               variant="ghost"
@@ -1398,35 +1388,38 @@ export function ChatArea() {
         <div className="hidden md:block">{sidebarPanel}</div>
 
         <section className="flex min-h-[100dvh] flex-1 flex-col overflow-hidden">
-          <header className="flex items-center justify-between gap-2 border-b border-border/50 bg-background/30 px-3 py-3 backdrop-blur-sm sm:px-6 sm:py-4">
+          <header className="flex items-center justify-between gap-2 border-b border-border/50 bg-background/40 px-3 py-2.5 backdrop-blur-sm sm:px-6">
             <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
                 size="icon"
-                className="h-10 w-10 md:hidden"
+                className="h-9 w-9 md:hidden"
                 onClick={() => {
                   setMobileSidebarOpen(true)
                 }}
                 aria-label="Open chat sidebar"
               >
-                <Menu className="h-5 w-5" />
+                <Menu className="h-4 w-4" />
               </Button>
-              <p className="text-sm text-muted-foreground">AEON Control Surface</p>
+              <div>
+                <p className="text-sm font-medium text-foreground">AEON Control Surface</p>
+                <p className="text-xs text-muted-foreground">Private Business Intelligence Workspace</p>
+              </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Button className="h-10 gap-2" onClick={() => setToolsOpen(true)}>
+              <Button className="h-9 gap-2" onClick={() => setToolsOpen(true)}>
                 <FileText className="h-4 w-4" />
                 Tools
               </Button>
 
-              <Button className="h-10 gap-2" onClick={() => setSettingsOpen(true)}>
+              <Button className="h-9 gap-2" onClick={() => setSettingsOpen(true)}>
                 <Settings className="h-4 w-4" />
-                Configuration
+                Config
               </Button>
 
               <div ref={exportMenuRef} className="relative">
-                <Button className="h-10 gap-2" onClick={() => setExportDropdownOpen((prev) => !prev)}>
+                <Button className="h-9 gap-2" onClick={() => setExportDropdownOpen((prev) => !prev)}>
                   <Upload className="h-4 w-4" />
                   Export
                 </Button>
@@ -1448,65 +1441,118 @@ export function ChatArea() {
             </div>
           </header>
 
-          <div className="flex flex-1 flex-col overflow-hidden px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:px-6 sm:pb-6 sm:pt-6">
-            <div className="relative mb-4 mt-1 w-full overflow-visible sm:mb-6 sm:mt-2">
-              <ParticleOrb state={currentOrbState} />
-            </div>
-
-            <h1 className="mb-4 text-center font-[var(--font-heading)] text-2xl font-semibold tracking-tight text-foreground sm:mb-6 sm:text-4xl">
-              AEON Ops Private Workspace
-            </h1>
-
-            <div className="mb-5 grid w-full max-w-4xl grid-cols-1 gap-2 self-center sm:grid-cols-3 sm:gap-3">
-              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("image_prompt")}>
-                <ImageIcon className="h-4 w-4" />
-                Visualize
-              </Button>
-              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("brainstorm")}>
-                <Lightbulb className="h-4 w-4" />
-                Explore Angles
-              </Button>
-              <Button variant="secondary" className="h-11 w-full gap-2" onClick={() => void handleQuickAction("plan")}>
-                <FileText className="h-4 w-4" />
-                Execution Plan
-              </Button>
-            </div>
-
-            <div className="mb-4 w-full max-w-4xl self-center">
-              <div className="max-h-56 overflow-y-auto rounded-xl border border-border/40 bg-background/40 p-3 sm:max-h-80">
-                {messages.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No messages yet. Start with a quick action or send a message.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {messages.map((item) => (
-                      <article
-                        key={item.id}
-                        className={`rounded-lg border p-3 text-sm ${
-                          item.role === "user"
-                            ? "border-primary/40 bg-primary/10"
-                            : item.role === "assistant"
-                              ? "border-border/40 bg-secondary/20"
-                              : "border-amber-500/30 bg-amber-500/10"
-                        }`}
-                      >
-                        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          {item.role} · {MODE_LABEL[item.mode]}
-                        </p>
-                        <p className="whitespace-pre-wrap">{item.text}</p>
-                        {item.sources && item.sources.length > 0 && (
-                          <p className="mt-2 text-xs text-muted-foreground">Used {item.sources.length} retrieved source(s).</p>
-                        )}
-                      </article>
-                    ))}
-                    {isLoading && <p className="text-sm text-muted-foreground">AEON is thinking...</p>}
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto px-2 pb-4 pt-2 sm:px-4 sm:pb-6 sm:pt-4">
+              {messages.length === 0 ? (
+                <div className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-8 text-center sm:py-12">
+                  <div className="relative mb-4 w-full max-w-[120px] sm:mb-5 sm:max-w-[168px]">
+                    <ParticleOrb state={currentOrbState} />
                   </div>
-                )}
-              </div>
+                  <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">AEON Ops Private Workspace</h1>
+                  <p className="mt-2 max-w-2xl text-sm text-muted-foreground sm:text-base">
+                    Your private operations intelligence workspace for business documents, repo context, and execution planning.
+                  </p>
+
+                  <div className="mt-6 grid w-full max-w-3xl grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full justify-start gap-2"
+                      onClick={() => handleQuickAction("What documents are currently indexed in the knowledge base?")}
+                    >
+                      <Search className="h-4 w-4" />
+                      Ask about business docs
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full justify-start gap-2"
+                      onClick={() => handleQuickAction("Check Drive ingestion coverage and report current indexed status.")}
+                    >
+                      <Upload className="h-4 w-4" />
+                      Check Drive ingestion
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full justify-start gap-2"
+                      onClick={() => handleQuickAction("Summarize the latest files that were indexed and what they contain.")}
+                    >
+                      <FileText className="h-4 w-4" />
+                      Summarize latest files
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full justify-start gap-2"
+                      onClick={() => handleQuickAction("Plan the next execution step based on current project state.")}
+                    >
+                      <Lightbulb className="h-4 w-4" />
+                      Plan next execution step
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      className="h-10 w-full justify-start gap-2 sm:col-span-2"
+                      onClick={() => handleQuickAction("Audit repo status, recent changes, and immediate risks.")}
+                    >
+                      <ImageIcon className="h-4 w-4" />
+                      Audit repo status
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ul className="mx-auto flex w-full max-w-4xl flex-col gap-5 px-4 py-5 sm:py-6">
+                  {messages.map((item) => {
+                    const isUser = item.role === "user"
+                    const isAssistant = item.role === "assistant"
+
+                    return (
+                      <li key={item.id} className={`flex w-full ${isUser ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[90%] rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm sm:max-w-[85%] ${
+                            isUser
+                              ? "bg-primary text-primary-foreground"
+                              : isAssistant
+                                ? "border border-border/60 bg-secondary/35 text-foreground"
+                                : "border border-amber-500/40 bg-amber-500/10 text-foreground"
+                          }`}
+                        >
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            {item.role} · {MODE_LABEL[item.mode]}
+                          </p>
+                          <p className="whitespace-pre-wrap break-words">{item.text}</p>
+
+                          {item.sources && item.sources.length > 0 && (
+                            <div className="mt-3 rounded-xl border border-border/50 bg-background/50 p-2.5">
+                              <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                                Retrieved Sources ({item.sources.length})
+                              </p>
+                              <ul className="space-y-1">
+                                {item.sources.slice(0, 4).map((source, sourceIndex) => (
+                                  <li key={`${item.id}-source-${sourceIndex}`} className="text-xs text-muted-foreground">
+                                    {source.documentName}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
+
+                  {isLoading && (
+                    <li className="flex w-full justify-start">
+                      <div className="max-w-[85%] rounded-2xl border border-border/60 bg-secondary/35 px-4 py-3 text-sm text-muted-foreground">
+                        AEON is thinking...
+                      </div>
+                    </li>
+                  )}
+
+                  <li aria-hidden="true" className="h-1" ref={threadEndRef} />
+                </ul>
+              )}
             </div>
 
-            <div className="mt-auto w-full max-w-4xl self-center">
+            <div className="sticky bottom-0 z-20 border-t border-border/40 bg-background/85 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur-xl sm:px-6 sm:pb-4">
               {isListening && (
-                <div className="mb-3 rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl sm:rounded-full sm:px-6">
+                <div className="mx-auto mb-3 w-full max-w-4xl rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl sm:rounded-full sm:px-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-6">
                     <div className="flex shrink-0 items-center gap-2">
                       <div className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
@@ -1539,7 +1585,7 @@ export function ChatArea() {
                 </div>
               )}
 
-              <div className="rounded-2xl border border-border/50 bg-gradient-to-br from-secondary/70 via-secondary/60 to-secondary/50 p-3 shadow-2xl backdrop-blur-xl sm:p-4">
+              <div className="mx-auto w-full max-w-4xl rounded-2xl border border-border/50 bg-gradient-to-br from-secondary/70 via-secondary/60 to-secondary/50 p-3 shadow-2xl backdrop-blur-xl sm:p-4">
                 <div className="space-y-4">
                   <textarea
                     ref={composerInputRef}
