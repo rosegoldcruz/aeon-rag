@@ -1211,9 +1211,7 @@ export function ChatArea() {
 
   const sidebarPanel = (
     <aside
-      className={`h-full border-r border-border/40 bg-background/80 backdrop-blur-sm transition-all duration-200 ${
-        sidebarIsCollapsed ? "w-[84px]" : "w-[300px]"
-      }`}
+      className="h-full w-[300px] border-r border-border/40 bg-background/80 backdrop-blur-sm transition-all duration-200"
     >
       <div className="flex h-full flex-col">
         <div className="border-b border-border/40 p-3">
@@ -1385,11 +1383,27 @@ export function ChatArea() {
       <div className="absolute inset-0 opacity-[0.15] grid-background" />
 
       <div className="relative z-10 flex w-full">
-        <div className="hidden md:block">{sidebarPanel}</div>
+        <div
+          className={`hidden overflow-hidden border-r border-border/40 transition-[width] duration-200 md:block ${
+            sidebarIsCollapsed ? "w-0 border-r-0" : "w-[300px]"
+          }`}
+        >
+          {sidebarPanel}
+        </div>
 
         <section className="flex min-h-[100dvh] flex-1 flex-col overflow-hidden">
           <header className="flex items-center justify-between gap-2 border-b border-border/50 bg-background/40 px-3 py-2.5 backdrop-blur-sm sm:px-6">
             <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="icon"
+                className="hidden h-9 w-9 md:flex"
+                onClick={() => setSidebarCollapsed((prev) => !prev)}
+                aria-label={sidebarIsCollapsed ? "Open chat sidebar" : "Close chat sidebar"}
+              >
+                {sidebarIsCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+              </Button>
+
               <Button
                 variant="secondary"
                 size="icon"
