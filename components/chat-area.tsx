@@ -964,6 +964,21 @@ export function ChatArea() {
     event.target.value = ""
   }
 
+  const handleComposerPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items || [])
+    const pastedImages = items
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => file !== null)
+
+    if (pastedImages.length === 0) {
+      return
+    }
+
+    setUploadMessage(`Uploading ${pastedImages.length} pasted image(s)...`)
+    void uploadSelectedFiles(pastedImages)
+  }
+
   const submitChat = async (mode: ChatMode, rawText?: string) => {
     if (isLoading) {
       return
@@ -1606,6 +1621,7 @@ export function ChatArea() {
                     placeholder="Ask AEON anything..."
                     value={inputMessage}
                     onChange={(event) => setInputMessage(event.target.value)}
+                    onPaste={handleComposerPaste}
                     onKeyDown={(event) => {
                       if (!isMobile && event.key === "Enter" && !event.shiftKey) {
                         event.preventDefault()
