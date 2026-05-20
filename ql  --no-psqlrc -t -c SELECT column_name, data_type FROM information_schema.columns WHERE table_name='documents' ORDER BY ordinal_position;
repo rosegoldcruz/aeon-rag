@@ -1,0 +1,31 @@
+                                Table "public.documents"
+      Column      |           Type           | Collation | Nullable |      Default      
+------------------+--------------------------+-----------+----------+-------------------
+ id               | uuid                     |           | not null | gen_random_uuid()
+ original_name    | text                     |           |          | 
+ stored_path      | text                     |           | not null | 
+ mime_type        | text                     |           |          | 
+ size_bytes       | bigint                   |           | not null | 
+ status           | text                     |           | not null | 'uploaded'::text
+ created_at       | timestamp with time zone |           |          | now()
+ name             | text                     |           | not null | 
+ type             | text                     |           | not null | 
+ error            | text                     |           |          | 
+ updated_at       | timestamp with time zone |           |          | now()
+ source           | text                     |           |          | 
+ source_file_id   | text                     |           |          | 
+ drive_path       | text                     |           |          | 
+ content_hash     | text                     |           |          | 
+ imported_at      | timestamp with time zone |           |          | 
+ last_ingested_at | timestamp with time zone |           |          | 
+Indexes:
+    "documents_pkey" PRIMARY KEY, btree (id)
+    "idx_documents_drive_path" btree (drive_path)
+    "idx_documents_drive_path_hash" btree (drive_path, content_hash)
+    "idx_documents_drive_path_hash_unique" UNIQUE, btree (drive_path, content_hash) WHERE drive_path IS NOT NULL AND content_hash IS NOT NULL
+    "idx_documents_source" btree (source)
+    "idx_documents_status" btree (status)
+Referenced by:
+    TABLE "chunks" CONSTRAINT "chunks_document_id_fkey" FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    TABLE "document_chunks" CONSTRAINT "document_chunks_document_id_fkey" FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+
