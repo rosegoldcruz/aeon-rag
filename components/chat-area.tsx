@@ -1391,7 +1391,7 @@ export function ChatArea() {
           {sidebarPanel}
         </div>
 
-        <section className="flex min-h-[100dvh] flex-1 flex-col overflow-hidden">
+        <section className="flex min-h-[100dvh] min-h-0 flex-1 flex-col overflow-hidden">
           <header className="flex items-center justify-between gap-2 border-b border-border/50 bg-background/40 px-3 py-2.5 backdrop-blur-sm sm:px-6">
             <div className="flex items-center gap-2">
               <Button
@@ -1455,8 +1455,9 @@ export function ChatArea() {
             </div>
           </header>
 
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto px-2 pb-4 pt-2 sm:px-4 sm:pb-6 sm:pt-4">
+          <div className="flex min-h-0 flex-1 overflow-hidden p-2 sm:p-4">
+            <div className="mx-auto flex min-h-0 w-full max-w-4xl flex-1 flex-col overflow-hidden rounded-2xl border border-border/50 bg-background/70">
+              <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2 pt-2 sm:px-4 sm:pb-4 sm:pt-4">
               {messages.length === 0 ? (
                 <div className="mx-auto flex w-full max-w-4xl flex-col items-center px-4 py-8 text-center sm:py-12">
                   <div className="relative mb-4 w-full max-w-[120px] sm:mb-5 sm:max-w-[168px]">
@@ -1564,9 +1565,9 @@ export function ChatArea() {
               )}
             </div>
 
-            <div className="sticky bottom-0 z-20 border-t border-border/40 bg-background/85 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 backdrop-blur-xl sm:px-6 sm:pb-4">
+              <div className="z-20 shrink-0 border-t border-border/40 bg-background/70 px-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:px-6 sm:pb-4">
               {isListening && (
-                <div className="mx-auto mb-3 w-full max-w-4xl rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl sm:rounded-full sm:px-6">
+                <div className="mb-3 w-full rounded-2xl border border-border/50 bg-gradient-to-r from-black/90 via-black/95 to-black/90 px-4 py-3 shadow-2xl sm:rounded-full sm:px-6">
                   <div className="flex flex-wrap items-center justify-between gap-3 sm:gap-6">
                     <div className="flex shrink-0 items-center gap-2">
                       <div className="h-2 w-2 animate-pulse rounded-full bg-destructive" />
@@ -1599,8 +1600,7 @@ export function ChatArea() {
                 </div>
               )}
 
-              <div className="mx-auto w-full max-w-4xl rounded-2xl border border-border/50 bg-gradient-to-br from-secondary/70 via-secondary/60 to-secondary/50 p-3 shadow-2xl backdrop-blur-xl sm:p-4">
-                <div className="space-y-4">
+              <div className="space-y-4 py-1 sm:py-2">
                   <textarea
                     ref={composerInputRef}
                     placeholder="Ask AEON anything..."
