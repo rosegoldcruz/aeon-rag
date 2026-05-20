@@ -5,7 +5,11 @@ import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import { ingestStoredFile } from "@/lib/ingest"
 
-const MAX_FILE_SIZE = 20 * 1024 * 1024
+const MAX_UPLOAD_FILE_SIZE_MB = Number.parseInt(process.env.UPLOAD_MAX_FILE_MB || "100", 10)
+const MAX_FILE_SIZE = (Number.isFinite(MAX_UPLOAD_FILE_SIZE_MB) && MAX_UPLOAD_FILE_SIZE_MB > 0 ? MAX_UPLOAD_FILE_SIZE_MB : 100) * 1024 * 1024
+const INLINE_INGEST_MAX_FILE_SIZE_MB = Number.parseInt(process.env.INLINE_INGEST_MAX_FILE_MB || "20", 10)
+const INLINE_INGEST_MAX_FILE_SIZE =
+  (Number.isFinite(INLINE_INGEST_MAX_FILE_SIZE_MB) && INLINE_INGEST_MAX_FILE_SIZE_MB > 0 ? INLINE_INGEST_MAX_FILE_SIZE_MB : 20) * 1024 * 1024
 const UPLOAD_DIR = "/var/lib/aeonops/uploads"
 const FAILED_UPLOAD_DIR = "/var/lib/aeonops/uploads/failed"
 const INLINE_INGEST_EXTENSIONS = new Set([".txt", ".md", ".json", ".csv", ".pdf"])
@@ -77,7 +81,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: false,
-        error: "File exceeds 20MB limit.",
+        error: `File exceeds ${Math.round(MAX_FILE_SIZE / (1024 * 1024))}MB limit.`,
       },
       { status: 413 },
     )
@@ -124,7 +128,7 @@ export async function POST(request: Request) {
   let status: "uploaded" | "indexed" | "failed" = "uploaded"
   const fileType = file.type || extension.replace(".", "") || "application/octet-stream"
 
-  if (INLINE_INGEST_EXTENSIONS.has(extension)) {
+  if (INLINE_INGEST_EXTENSIONS.has(extension) && file.size <= INLINE_INGEST_MAX_FILE_SIZE) {
     try {
       const ingestedResult = await ingestStoredFile({
         storedPath: storagePath,
@@ -145,7 +149,11 @@ export async function POST(request: Request) {
         safeMessage.includes("Unsupported file type") ||
         safeMessage.includes("coming next") ||
         safeMessage.includes("No chunks") ||
-        safeMessage.includes("Missing PDF extractor dependency")
+        safeMessage.includes("Missing PDF extractor dependency") ||
+        safeMessage.includes("File too large for inline extraction") ||
+        safeMessage.includes("Extracted text was empty after sanitization") ||
+        safeMessage.includes("pdftotext failed") ||
+        safeMessage.includes("invalid byte sequence for encoding")
       ) {
         status = "uploaded"
       } else {
@@ -162,7 +170,11 @@ export async function POST(request: Request) {
       }
     }
   } else {
-    ingestError = "Inline parsing for this file type is coming next."
+    if (INLINE_INGEST_EXTENSIONS.has(extension) && file.size > INLINE_INGEST_MAX_FILE_SIZE) {
+      ingestError = `Upload succeeded, but inline indexing was skipped because file exceeds ${Math.round(INLINE_INGEST_MAX_FILE_SIZE / (1024 * 1024))}MB inline limit.`
+    } else {
+      ingestError = "Inline parsing for this file type is coming next."
+    }
     status = "uploaded"
   }
 
