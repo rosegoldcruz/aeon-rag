@@ -905,7 +905,8 @@ export function ChatArea() {
           body: formData,
         })
 
-        const payload = (await response.json()) as {
+        const contentType = response.headers.get("content-type") || ""
+        let payload: {
           ok?: boolean
           file?: UploadedFile
           ingested?: boolean
@@ -913,10 +914,47 @@ export function ChatArea() {
           ingestError?: string
           reason?: string
           error?: string
+        } | null = null
+        let fallbackError = ""
+
+        if (contentType.includes("application/json")) {
+          payload = (await response.json()) as {
+            ok?: boolean
+            file?: UploadedFile
+            ingested?: boolean
+            chunkCount?: number
+            ingestError?: string
+            reason?: string
+            error?: string
+          }
+        } else {
+          const raw = await response.text()
+          fallbackError = raw
+            .replace(/<[^>]+>/g, " ")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 220)
         }
 
-        if (!response.ok || !payload.ok || !payload.file) {
-          throw new Error(payload.error || "Upload failed")
+        if (!response.ok || !payload?.ok || !payload?.file) {
+          if (response.status === 413) {
+            throw new Error("File exceeds upload size limit.")
+          }
+
+          if (response.status === 401 || response.status === 403) {
+            throw new Error("Upload unauthorized. Refresh and sign in again.")
+          }
+
+          if (response.redirected && !contentType.includes("application/json")) {
+            throw new Error("Upload request was redirected. Refresh and sign in again.")
+          }
+
+          throw new Error(
+            payload?.error ||
+              payload?.reason ||
+              fallbackError ||
+              `Upload failed (HTTP ${response.status}).`,
+          )
         }
 
         uploaded.push({
@@ -934,10 +972,11 @@ export function ChatArea() {
             reason: payload.ingestError || payload.reason || "Unknown ingestion failure",
           })
         }
-      } catch {
+      } catch (error) {
+        const safeReason = error instanceof Error && error.message ? error.message : "Upload request failed."
         failed.push({
           name: file.name,
-          reason: "Upload request failed.",
+          reason: safeReason,
         })
       }
     }
