@@ -15,10 +15,12 @@ import {
   Paperclip,
   Search,
   Settings,
+  Shield,
   Trash2,
   Upload,
   X,
 } from "lucide-react"
+import { useRouter } from "next/navigation"
 import { signOut, useSession } from "next-auth/react"
 import { ParticleOrb, type OrbState } from "@/components/particle-orb"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -171,11 +173,8 @@ function getInitials(input: string) {
   return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
 }
 
-function getAeonModelLabel(modelId: string) {
-  return MODEL_FALLBACK.find((item) => item.id === modelId)?.label || "AEON Core"
-}
-
 export function ChatArea() {
+  const router = useRouter()
   const isMobile = useIsMobile()
   const sessionState = useSession()
   const session = sessionState?.data
@@ -197,7 +196,6 @@ export function ChatArea() {
 
   const [optionsMenuOpen, setOptionsMenuOpen] = useState(false)
   const [exportDropdownOpen, setExportDropdownOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -282,10 +280,6 @@ export function ChatArea() {
   const optionsMenuRef = useRef<HTMLDivElement | null>(null)
   const exportMenuRef = useRef<HTMLDivElement | null>(null)
   const threadEndRef = useRef<HTMLLIElement | null>(null)
-
-  const selectedModelLabel = useMemo(() => {
-    return models.find((item) => item.id === selectedModel)?.label || getAeonModelLabel(selectedModel)
-  }, [models, selectedModel])
 
   const profileName = session?.user?.name?.trim() || "ZITADEL User"
   const profileEmail = session?.user?.email?.trim() || "Authenticated session"
@@ -712,7 +706,6 @@ export function ChatArea() {
       setMobileSidebarOpen(false)
       setOptionsMenuOpen(false)
       setExportDropdownOpen(false)
-      setSettingsOpen(false)
       setToolsOpen(false)
     }
 
@@ -1389,6 +1382,24 @@ export function ChatArea() {
                 variant="ghost"
                 size="icon"
                 className="h-9 w-9"
+                onClick={() => router.push("/settings")}
+                aria-label="Settings"
+              >
+                <Settings className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                onClick={() => router.push("/admin")}
+                aria-label="Admin"
+              >
+                <Shield className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
                 onClick={() => {
                   void signOut({ callbackUrl: "/login" })
                 }}
@@ -1417,6 +1428,22 @@ export function ChatArea() {
                   <p className="truncate text-[11px] text-muted-foreground">{profileEmail}</p>
                 </div>
               </div>
+              <Button
+                variant="secondary"
+                className="mt-2 h-8 w-full justify-start gap-2 text-xs"
+                onClick={() => router.push("/settings")}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </Button>
+              <Button
+                variant="secondary"
+                className="mt-2 h-8 w-full justify-start gap-2 text-xs"
+                onClick={() => router.push("/admin")}
+              >
+                <Shield className="h-3.5 w-3.5" />
+                Admin Portal
+              </Button>
               <Button
                 variant="secondary"
                 className="mt-2 h-8 w-full justify-start gap-2 text-xs"
@@ -1484,9 +1511,14 @@ export function ChatArea() {
                 Tools
               </Button>
 
-              <Button className="h-9 gap-2" onClick={() => setSettingsOpen(true)}>
+              <Button className="h-9 gap-2" onClick={() => router.push("/settings")}>
                 <Settings className="h-4 w-4" />
-                Config
+                Settings
+              </Button>
+
+              <Button className="h-9 gap-2" onClick={() => router.push("/admin") }>
+                <Shield className="h-4 w-4" />
+                Admin
               </Button>
 
               <div ref={exportMenuRef} className="relative">
@@ -1764,7 +1796,7 @@ export function ChatArea() {
                         Attach
                       </Button>
 
-                      <Button variant="ghost" size="sm" className="min-h-11 gap-2 px-3" onClick={() => setSettingsOpen(true)}>
+                      <Button variant="ghost" size="sm" className="min-h-11 gap-2 px-3" onClick={() => router.push("/settings")}>
                         <Settings className="h-4 w-4" />
                         Settings
                       </Button>
@@ -1901,37 +1933,6 @@ export function ChatArea() {
         </div>
       )}
 
-      {settingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setSettingsOpen(false)} />
-          <section className="relative w-full max-w-lg rounded-xl border border-border/40 bg-background p-5 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Settings and Configuration</h2>
-              <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setSettingsOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-
-            <div className="space-y-3 text-sm">
-              <p>
-                <span className="font-semibold">Current AEON engine:</span> {selectedModelLabel}
-              </p>
-              <p>
-                <span className="font-semibold">RAG indexed docs:</span> {ragStatus.indexedDocuments}
-              </p>
-              <p>
-                <span className="font-semibold">RAG chunks:</span> {ragStatus.chunks}
-              </p>
-              <p>
-                <span className="font-semibold">Voice input support:</span> browser-dependent
-              </p>
-              <p>
-                <span className="font-semibold">Theme and profile controls:</span> coming soon
-              </p>
-            </div>
-          </section>
-        </div>
-      )}
     </main>
   )
 }

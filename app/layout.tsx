@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import type { Viewport } from "next"
 import { Space_Grotesk, Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import { AppToaster } from "@/components/ui/app-toaster"
 import "./globals.css"
 
 const spaceGrotesk = Space_Grotesk({
@@ -57,6 +58,7 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} ${spaceGrotesk.variable} font-sans antialiased`}>
         {children}
+        <AppToaster />
         <Analytics />
       </body>
     </html>
