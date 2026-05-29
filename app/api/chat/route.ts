@@ -24,11 +24,13 @@ type ResponseStyle = "balanced" | "direct" | "detailed"
 
 type ChatRequest = {
   message?: unknown
+  messages?: unknown
   mode?: unknown
   model?: unknown
   sessionId?: unknown
   attachments?: unknown
   tools?: unknown
+  crmContext?: unknown
   options?: {
     responseStyle?: unknown
     includeExecutionSteps?: unknown
@@ -73,10 +75,81 @@ function validateAiConfig(provider: ReturnType<typeof resolveAiModel>["provider"
       }
 }
 
-export async function POST(request: Request) {
-  const session = await getAuthenticatedSession()
+function getInternalAuthStatus(request: Request) {
+  const internalKey = request.headers.get("x-aeon-internal-key")?.trim()
+  if (!internalKey) return { attempted: false as const, ok: false as const }
 
-  if (!session) {
+  const expectedKey = process.env.AEON_INTERNAL_API_KEY?.trim()
+  if (!expectedKey) {
+    return {
+      attempted: true as const,
+      ok: false as const,
+      status: 503,
+      message: "Missing required env var: AEON_INTERNAL_API_KEY",
+    }
+  }
+
+  if (internalKey !== expectedKey) {
+    return {
+      attempted: true as const,
+      ok: false as const,
+      status: 401,
+      message: "Unauthorized",
+    }
+  }
+
+  return { attempted: true as const, ok: true as const }
+}
+
+function getTextFromMessagePart(part: unknown) {
+  if (!part || typeof part !== "object") return ""
+  const value = part as Record<string, unknown>
+  if (typeof value.text === "string") return value.text
+  if (typeof value.content === "string") return value.content
+  return ""
+}
+
+function getMessageFromBody(body: ChatRequest) {
+  if (typeof body.message === "string" && body.message.trim()) {
+    return body.message.trim()
+  }
+
+  if (!Array.isArray(body.messages)) return ""
+
+  const messages = body.messages as Array<Record<string, unknown>>
+  const lastUserMessage = [...messages].reverse().find((item) => item?.role === "user") || messages.at(-1)
+  if (!lastUserMessage || typeof lastUserMessage !== "object") return ""
+
+  if (typeof lastUserMessage.content === "string") {
+    return lastUserMessage.content.trim()
+  }
+
+  if (Array.isArray(lastUserMessage.parts)) {
+    return lastUserMessage.parts.map(getTextFromMessagePart).join("\n").trim()
+  }
+
+  return ""
+}
+
+function buildCrmContextBlock(input: unknown) {
+  if (!input || typeof input !== "object") return ""
+
+  return [
+    "CRM context supplied by a trusted internal workspace:",
+    JSON.stringify(input, null, 2),
+    "Use this CRM context as current request context only. Do not claim database writes or external actions unless a tool confirms them.",
+  ].join("\n")
+}
+
+export async function POST(request: Request) {
+  const internalAuth = getInternalAuthStatus(request)
+  if (internalAuth.attempted && !internalAuth.ok) {
+    return NextResponse.json({ ok: false, error: internalAuth.message }, { status: internalAuth.status })
+  }
+
+  const session = internalAuth.ok ? null : await getAuthenticatedSession()
+
+  if (!internalAuth.ok && !session) {
     return unauthorizedResponse()
   }
 
@@ -94,7 +167,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const message = typeof body.message === "string" ? body.message.trim() : ""
+  const message = getMessageFromBody(body)
   const mode: ChatMode = isMode(body.mode) ? body.mode : "chat"
   const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
   const modelConfig = resolveAiModel(requestedModel)
@@ -142,6 +215,7 @@ export async function POST(request: Request) {
     attachments.length > 0
       ? `User attached files metadata: ${JSON.stringify(attachments)}`
       : ""
+  const crmContextBlock = buildCrmContextBlock(body.crmContext)
 
   const toolResult = await runAeonToolRouter({
     message,
@@ -177,6 +251,7 @@ export async function POST(request: Request) {
     styleInstruction,
     executionInstruction,
     attachmentContext,
+    crmContextBlock,
     ...toolResult.contextBlocks,
   ]
     .filter(Boolean)
