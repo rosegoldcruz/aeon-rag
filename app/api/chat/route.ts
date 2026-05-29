@@ -9,14 +9,15 @@ import {
   updateSessionTitleIfNew,
 } from "@/lib/chat-store"
 import {
-  createDeepSeekProvider,
-  DEEPSEEK_BASE_URL,
-  DEEPSEEK_MODELS,
-  getDefaultDeepSeekModel,
-  getDeepSeekApiKey,
-  isDeepSeekModel,
-} from "@/lib/deepseek"
-import { retrieveContext } from "@/lib/retrieve"
+  createAiProvider,
+  getAiProviderBaseURL,
+  getAiProviderLabel,
+  getAvailableAiModels,
+  getDefaultAiModel,
+  isProviderConfigured,
+  resolveAiModel,
+} from "@/lib/ai-provider"
+import { normalizeAeonToolToggles, runAeonToolRouter } from "@/lib/aeon-tools"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
 type ResponseStyle = "balanced" | "direct" | "detailed"
@@ -27,6 +28,7 @@ type ChatRequest = {
   model?: unknown
   sessionId?: unknown
   attachments?: unknown
+  tools?: unknown
   options?: {
     responseStyle?: unknown
     includeExecutionSteps?: unknown
@@ -34,8 +36,7 @@ type ChatRequest = {
   }
 }
 
-const SUPPORTED_MODELS = DEEPSEEK_MODELS.map((model) => model.id)
-const DEFAULT_MODEL = getDefaultDeepSeekModel()
+const DEFAULT_MODEL = getDefaultAiModel()
 const SYSTEM_PROMPT =
   "You are AEON, an internal operations intelligence agent for SNRG Labs. You are a sharp systems partner, not a corporate chatbot. Default to short, direct answers in plain operational language. Prioritize what changed, what is broken, what matters, and the next move. Do not pad responses with generic bullet lists. Do not over-explain obvious concepts. Do not invent data. When using RAG, ground answers in retrieved context. If context is missing, state exactly what is missing and which query or tool would surface it. Match the user's urgency without becoming chaotic. Be useful, blunt, and execution-focused."
 
@@ -48,7 +49,9 @@ const MODE_INSTRUCTIONS: Record<ChatMode, string> = {
     "Return only a polished, production-ready image generation prompt based on user intent. Start with 'Image prompt:' and include style, composition, lighting, and mood.",
 }
 
-const FALLBACK_MODELS = SUPPORTED_MODELS.filter((model) => model !== DEFAULT_MODEL)
+const FALLBACK_MODELS = getAvailableAiModels()
+  .map((model) => model.id)
+  .filter((model) => model !== DEFAULT_MODEL)
 
 function isMode(value: unknown): value is ChatMode {
   return value === "chat" || value === "brainstorm" || value === "plan" || value === "image_prompt"
@@ -58,16 +61,16 @@ function isResponseStyle(value: unknown): value is ResponseStyle {
   return value === "balanced" || value === "direct" || value === "detailed"
 }
 
-function validateDeepSeekConfig() {
-  try {
-    getDeepSeekApiKey()
-    return { ok: true as const }
-  } catch (error) {
-    return {
-      ok: false as const,
-      message: error instanceof Error ? error.message : "DeepSeek is not configured.",
-    }
-  }
+function validateAiConfig(provider: ReturnType<typeof resolveAiModel>["provider"]) {
+  return isProviderConfigured(provider)
+    ? { ok: true as const }
+    : {
+        ok: false as const,
+        message:
+          provider === "mistral_codestral"
+            ? "Missing required env var: MISTRAL_CODESTRAL_API_KEY, CODESTRAL_API_KEY, MISTRAL_VIBE_API_KEY, VIBE_API_KEY, or MISTRAL_API_KEY"
+            : "Missing required env var: DEEPSEEK_API_KEY",
+      }
 }
 
 export async function POST(request: Request) {
@@ -94,9 +97,11 @@ export async function POST(request: Request) {
   const message = typeof body.message === "string" ? body.message.trim() : ""
   const mode: ChatMode = isMode(body.mode) ? body.mode : "chat"
   const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
-  const model = isDeepSeekModel(requestedModel) ? requestedModel : DEFAULT_MODEL
+  const modelConfig = resolveAiModel(requestedModel)
+  const model = modelConfig.id
   const sessionIdInput = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : ""
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
+  const tools = normalizeAeonToolToggles(body.tools)
   const responseStyle = isResponseStyle(body.options?.responseStyle) ? body.options?.responseStyle : "balanced"
   const includeExecutionSteps = body.options?.includeExecutionSteps === true
   const useUploadedContext = body.options?.useUploadedContext !== false
@@ -111,7 +116,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const configCheck = validateDeepSeekConfig()
+  const configCheck = validateAiConfig(modelConfig.provider)
   if (!configCheck.ok) {
     return NextResponse.json(
       {
@@ -138,39 +143,32 @@ export async function POST(request: Request) {
       ? `User attached files metadata: ${JSON.stringify(attachments)}`
       : ""
 
-  let retrievedContextBlock = ""
-  let retrievedChunkCount = 0
-  let retrievedSources: Array<{ documentName: string; content: string; score?: number }> = []
-
-  if (useUploadedContext) {
-    try {
-      const retrieved = await retrieveContext(message, 5)
-      retrievedSources = retrieved.sources
-
-      if (retrieved.context) {
-        retrievedChunkCount = retrieved.sources.length
-        retrievedContextBlock =
-          "Relevant context from uploaded documents:\n" +
-          retrieved.context +
-          "\n\nUse this context where relevant. If the context does not answer the question, say so and answer from general reasoning. Include sources when practical."
-      }
-    } catch (error) {
-      const safeMessage = error instanceof Error ? error.message : "Unknown retrieval failure"
-      console.error("[api/chat] Retrieval step failed", { message: safeMessage })
-    }
-  }
+  const toolResult = await runAeonToolRouter({
+    message,
+    tools: {
+      ...tools,
+      rag: tools.rag && useUploadedContext,
+    },
+    failOpen: true,
+  })
 
   const candidateModels = Array.from(new Set([model, DEFAULT_MODEL, ...FALLBACK_MODELS].filter(Boolean)))
+    .map((candidate) => resolveAiModel(candidate))
+    .filter((candidate) => candidate.provider === modelConfig.provider && isProviderConfigured(candidate.provider))
 
-  console.info("[api/chat] DeepSeek request start", {
+  console.info("[api/chat] AI request start", {
     selectedModel: model,
-    candidateModels,
-    baseURL: DEEPSEEK_BASE_URL,
-    apiKeyConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
+    selectedProvider: modelConfig.provider,
+    candidateModels: candidateModels.map((candidate) => candidate.id),
+    candidateProviders: candidateModels.map((candidate) => candidate.provider),
+    baseURL: getAiProviderBaseURL(modelConfig.provider),
+    apiKeyConfigured: isProviderConfigured(modelConfig.provider),
     mode,
     attachmentCount: attachments.length,
     useUploadedContext,
-    retrievedChunkCount,
+    usedTools: toolResult.usedTools.map((tool) => tool.key),
+    unavailableTools: toolResult.unavailableTools.map((tool) => tool.key),
+    toolErrors: toolResult.toolErrors.map((tool) => tool.key),
   })
 
   const combinedSystem = [
@@ -179,13 +177,12 @@ export async function POST(request: Request) {
     styleInstruction,
     executionInstruction,
     attachmentContext,
-    retrievedContextBlock,
+    ...toolResult.contextBlocks,
   ]
     .filter(Boolean)
     .join("\n\n")
 
-  let lastError = "Unknown DeepSeek request failure"
-  const deepseek = createDeepSeekProvider()
+  let lastError = "Unknown AI provider request failure"
 
   let sessionId = sessionIdInput
   if (sessionId) {
@@ -211,14 +208,16 @@ export async function POST(request: Request) {
 
   for (const candidate of candidateModels) {
     try {
+      const provider = createAiProvider(candidate.provider)
       const result = await generateText({
-        model: deepseek(candidate),
+        model: provider(candidate.id),
         system: combinedSystem,
         prompt: message,
       })
 
-      console.info("[api/chat] DeepSeek response received", {
-        usedModel: candidate,
+      console.info("[api/chat] AI response received", {
+        provider: candidate.provider,
+        usedModel: candidate.id,
         textLength: result.text.length,
       })
 
@@ -226,23 +225,30 @@ export async function POST(request: Request) {
         sessionId,
         role: "assistant",
         content: result.text,
-        model: candidate,
-        ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
+        model: candidate.id,
+        ...(toolResult.sources.length > 0 ? { sources: toolResult.sources } : {}),
       })
 
       return NextResponse.json({
         ok: true,
         message: result.text,
         mode,
-        model: candidate,
+        model: candidate.id,
+        provider: getAiProviderLabel(candidate.provider),
         sessionId,
-        ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
+        toolTrace: {
+          usedTools: toolResult.usedTools,
+          unavailableTools: toolResult.unavailableTools,
+          toolErrors: toolResult.toolErrors,
+        },
+        ...(toolResult.sources.length > 0 ? { sources: toolResult.sources } : {}),
       })
     } catch (error) {
-      const safeMessage = error instanceof Error ? error.message : "Unknown DeepSeek request failure"
+      const safeMessage = error instanceof Error ? error.message : "Unknown AI provider request failure"
       lastError = safeMessage
-      console.error("[api/chat] DeepSeek model attempt failed", {
-        attemptedModel: candidate,
+      console.error("[api/chat] AI model attempt failed", {
+        attemptedProvider: candidate.provider,
+        attemptedModel: candidate.id,
         message: safeMessage,
       })
     }
@@ -251,7 +257,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       ok: false,
-      error: `DeepSeek model call failed: ${lastError}`,
+      error: `AI provider model call failed: ${lastError}`,
     },
     { status: 502 },
   )

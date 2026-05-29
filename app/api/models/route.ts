@@ -1,10 +1,15 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
-import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, getDefaultDeepSeekModel } from "@/lib/deepseek"
+import {
+  getAiProviderBaseURL,
+  getAiProviderLabel,
+  getAvailableAiModels,
+  getConfiguredAiProvider,
+  getConfiguredAiProviders,
+  getDefaultAiModel,
+} from "@/lib/ai-provider"
 import { getRagStats } from "@/lib/rag/db"
-
-const MODELS = DEEPSEEK_MODELS
 
 export const runtime = "nodejs"
 
@@ -39,15 +44,20 @@ export async function GET() {
   }
 
   const retrievalEnabled = ragStats.indexedDocuments > 0 && ragStats.chunks > 0
+  const activeProvider = getConfiguredAiProvider()
+  const configuredProviders = getConfiguredAiProviders()
+  const models = getAvailableAiModels()
 
   return NextResponse.json({
     ok: true,
-    models: MODELS,
-    selected: getDefaultDeepSeekModel(),
+    models,
+    selected: getDefaultAiModel(),
     status: {
-      aiProviderConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
-      aiProvider: process.env.DEEPSEEK_API_KEY ? "DeepSeek configured" : "DeepSeek not configured",
-      aiProviderBaseURL: DEEPSEEK_BASE_URL,
+      aiProviderConfigured: configuredProviders.length > 0,
+      aiProvider: `${getAiProviderLabel(activeProvider)}${configuredProviders.length > 0 ? " configured" : " not configured"}`,
+      aiProviderBaseURL: getAiProviderBaseURL(activeProvider),
+      activeProvider,
+      configuredProviders,
       voiceInput: "browser-dependent",
       uploadStorage: uploadReady ? "enabled" : "ready-on-first-upload",
       ragIngestion: retrievalEnabled ? "enabled" : "coming next",

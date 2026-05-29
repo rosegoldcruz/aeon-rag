@@ -4,7 +4,7 @@ AEON stands for Advanced Efficient Optimized Network.
 
 AEON Ops is a private agent workspace focused on execution-first workflows:
 - authenticated access
-- DeepSeek-powered chat
+- switchable DeepSeek and Mistral Codestral chat
 - RAG retrieval for indexed documents
 - operational controls for planning, brainstorming, and image-prompt generation
 
@@ -14,7 +14,7 @@ AEON Ops is a private agent workspace focused on execution-first workflows:
 - TypeScript
 - NextAuth (ZITADEL)
 - PostgreSQL
-- DeepSeek API
+- DeepSeek API or Mistral Codestral API
 - PM2
 
 ## Local Development

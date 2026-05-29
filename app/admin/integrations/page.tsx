@@ -2,6 +2,7 @@ import { access } from "node:fs/promises"
 import { constants } from "node:fs"
 import { AdminShell } from "@/components/admin/admin-shell"
 import { requireAdminPageAccess } from "@/lib/admin-portal"
+import { getConfiguredAiProviders, getAiProviderLabel } from "@/lib/ai-provider"
 import { getPool } from "@/lib/db"
 
 async function canWrite(path: string) {
@@ -30,8 +31,10 @@ export default async function AdminIntegrationsPage() {
     ["n8n", process.env.N8N_URL ? "configured" : "missing", process.env.N8N_URL || "N8N_URL missing"],
     [
       "AI Provider",
-      process.env.DEEPSEEK_API_KEY ? "configured" : "missing",
-      process.env.DEEPSEEK_API_KEY ? "DeepSeek API key configured" : "DEEPSEEK_API_KEY missing",
+      getConfiguredAiProviders().length > 0 ? "configured" : "missing",
+      getConfiguredAiProviders().length > 0
+        ? `${getConfiguredAiProviders().map(getAiProviderLabel).join(", ")} configured`
+        : "No AI provider API key set",
     ],
     [
       "Outlook",

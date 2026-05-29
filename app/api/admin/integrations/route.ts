@@ -2,6 +2,7 @@ import { access } from "node:fs/promises"
 import { constants } from "node:fs"
 import { NextResponse } from "next/server"
 import { isCurrentRequestAdminAuthenticated } from "@/lib/admin-portal"
+import { getConfiguredAiProviders, getAiProviderLabel } from "@/lib/ai-provider"
 import { getPool } from "@/lib/db"
 
 async function canWrite(path: string) {
@@ -43,9 +44,12 @@ export async function GET() {
       note: process.env.N8N_URL ? "n8n URL configured" : "n8n URL env not set",
     },
     aiProvider: {
-      configured: Boolean(process.env.DEEPSEEK_API_KEY),
-      status: process.env.DEEPSEEK_API_KEY ? "configured" : "missing",
-      note: process.env.DEEPSEEK_API_KEY ? "DeepSeek API key configured" : "DEEPSEEK_API_KEY not set",
+      configured: getConfiguredAiProviders().length > 0,
+      status: getConfiguredAiProviders().length > 0 ? "configured" : "missing",
+      note:
+        getConfiguredAiProviders().length > 0
+          ? `${getConfiguredAiProviders().map(getAiProviderLabel).join(", ")} configured`
+          : "No AI provider API key set",
     },
     outlook: {
       configured: Boolean(process.env.OUTLOOK_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID),

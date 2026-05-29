@@ -26,6 +26,7 @@ import { ParticleOrb, type OrbState } from "@/components/particle-orb"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { useIsMobile } from "@/components/ui/use-mobile"
+import { AEON_TOOL_LABELS, type AeonToolKey, type AeonToolToggles, type AeonToolTrace } from "@/lib/aeon-tool-types"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
 type ResponseStyle = "balanced" | "direct" | "detailed"
@@ -38,6 +39,7 @@ type ChatMessage = {
   timestamp: string
   model?: string
   sources?: Array<{ documentName: string; content: string; score?: number }>
+  toolTrace?: AeonToolTrace
 }
 
 type ChatSession = {
@@ -101,9 +103,34 @@ type ToolPanelItem = {
 }
 
 const MODEL_FALLBACK: ModelOption[] = [
+  { id: "codestral-latest", label: "AEON Codestral" },
   { id: "deepseek-v4-flash", label: "AEON Core" },
   { id: "deepseek-v4-pro", label: "AEON Deep Focus" },
 ]
+
+const TOOL_PICKER_OPTIONS: Array<{ key: AeonToolKey; label: string }> = [
+  { key: "rag", label: AEON_TOOL_LABELS.rag },
+  { key: "googleDrive", label: AEON_TOOL_LABELS.googleDrive },
+  { key: "websiteSearch", label: AEON_TOOL_LABELS.websiteSearch },
+  { key: "nocodb", label: AEON_TOOL_LABELS.nocodb },
+  { key: "calendar", label: AEON_TOOL_LABELS.calendar },
+  { key: "email", label: AEON_TOOL_LABELS.email },
+  { key: "files", label: AEON_TOOL_LABELS.files },
+  { key: "codebase", label: AEON_TOOL_LABELS.codebase },
+  { key: "adminOps", label: AEON_TOOL_LABELS.adminOps },
+]
+
+const DEFAULT_CLIENT_TOOL_TOGGLES: AeonToolToggles = {
+  rag: true,
+  googleDrive: false,
+  websiteSearch: false,
+  nocodb: false,
+  calendar: false,
+  email: false,
+  files: false,
+  codebase: false,
+  adminOps: false,
+}
 
 const MODE_LABEL: Record<ChatMode, string> = {
   chat: "Chat",
@@ -203,6 +230,7 @@ export function ChatArea() {
   const [responseStyle, setResponseStyle] = useState<ResponseStyle>("balanced")
   const [includeExecutionSteps, setIncludeExecutionSteps] = useState(true)
   const [useUploadedContext, setUseUploadedContext] = useState(true)
+  const [toolToggles, setToolToggles] = useState<AeonToolToggles>(DEFAULT_CLIENT_TOOL_TOGGLES)
 
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
@@ -301,6 +329,27 @@ export function ChatArea() {
   }, [sessionSearch, sessions])
 
   const currentOrbState: OrbState = isListening ? "listening" : orbState
+
+  const enabledToolLabels = TOOL_PICKER_OPTIONS.filter((tool) => toolToggles[tool.key]).map((tool) => tool.label)
+
+  const toggleTool = (key: AeonToolKey) => {
+    setToolToggles((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }))
+
+    if (key === "rag") {
+      setUseUploadedContext((prev) => !prev)
+    }
+  }
+
+  const toggleRagContext = () => {
+    setUseUploadedContext((prev) => !prev)
+    setToolToggles((prev) => ({
+      ...prev,
+      rag: !prev.rag,
+    }))
+  }
 
   const refreshRagStatus = async () => {
     try {
@@ -1086,6 +1135,7 @@ export function ChatArea() {
           message: submittedText,
           mode,
           model: selectedModel,
+          tools: toolToggles,
           sessionId,
           attachments: uploadedFiles.map((file) => ({
             id: file.id,
@@ -1109,6 +1159,7 @@ export function ChatArea() {
         model?: string
         sessionId?: string
         sources?: Array<{ documentName: string; content: string; score?: number }>
+        toolTrace?: AeonToolTrace
       }
 
       if (!response.ok || !payload.ok || !payload.message) {
@@ -1130,6 +1181,7 @@ export function ChatArea() {
           timestamp: new Date().toISOString(),
           model: payload.model || selectedModel,
           sources: payload.sources,
+          toolTrace: payload.toolTrace,
         },
       ])
 
@@ -1635,6 +1687,26 @@ export function ChatArea() {
                               </ul>
                             </div>
                           )}
+
+                          {isAssistant && item.toolTrace && (
+                            <div className="mt-3 rounded-xl border border-border/50 bg-background/50 p-2.5 text-xs text-muted-foreground">
+                              <p className="mb-1.5 text-[11px] uppercase tracking-wide">Tool Trace</p>
+                              <p>
+                                AEON used {item.toolTrace.usedTools.length > 0
+                                  ? item.toolTrace.usedTools.map((tool) => tool.label).join(", ")
+                                  : "no tools"}
+                                .
+                              </p>
+                              {(item.toolTrace.unavailableTools.length > 0 || item.toolTrace.toolErrors.length > 0) && (
+                                <div className="mt-2 space-y-1">
+                                  <p className="text-[11px] uppercase tracking-wide">Tool warnings</p>
+                                  {[...item.toolTrace.unavailableTools, ...item.toolTrace.toolErrors].map((tool) => (
+                                    <p key={`${item.id}-${tool.key}`}>{tool.label}: {tool.message || "unavailable"}</p>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </li>
                     )
@@ -1721,6 +1793,34 @@ export function ChatArea() {
                         ))}
                       </select>
                     </label>
+                  </div>
+
+                  <div className="rounded-xl border border-border/40 bg-background/45 p-2.5">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span>Tool access</span>
+                      <span>{enabledToolLabels.length > 0 ? enabledToolLabels.join(", ") : "No tools enabled"}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {TOOL_PICKER_OPTIONS.map((tool) => {
+                        const enabled = toolToggles[tool.key]
+
+                        return (
+                          <button
+                            key={tool.key}
+                            type="button"
+                            onClick={() => toggleTool(tool.key)}
+                            className={`rounded-full border px-3 py-1.5 text-xs transition-colors ${
+                              enabled
+                                ? "border-primary/60 bg-primary/15 text-foreground"
+                                : "border-border/50 bg-background/50 text-muted-foreground hover:text-foreground"
+                            }`}
+                            aria-pressed={enabled}
+                          >
+                            {tool.label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
 
                   {uploadedFiles.length > 0 && (
@@ -1819,8 +1919,8 @@ export function ChatArea() {
                             <button className="dropdown-item" onClick={() => setIncludeExecutionSteps((prev) => !prev)}>
                               Include execution steps: {includeExecutionSteps ? "on" : "off"}
                             </button>
-                            <button className="dropdown-item" onClick={() => setUseUploadedContext((prev) => !prev)}>
-                              Use uploaded context: {useUploadedContext ? "enabled" : "off"}
+                            <button className="dropdown-item" onClick={toggleRagContext}>
+                              Allow RAG context: {useUploadedContext ? "enabled" : "off"}
                             </button>
                           </div>
                         )}
