@@ -43,11 +43,9 @@ export async function GET() {
       note: process.env.N8N_URL ? "n8n URL configured" : "n8n URL env not set",
     },
     aiProvider: {
-      configured: Boolean(process.env.GOOGLE_VERTEX_PROJECT),
-      status: process.env.GOOGLE_VERTEX_PROJECT ? "configured" : "missing",
-      note: process.env.GOOGLE_VERTEX_PROJECT
-        ? "Google Vertex project configured"
-        : "GOOGLE_VERTEX_PROJECT not set",
+      configured: Boolean(process.env.DEEPSEEK_API_KEY),
+      status: process.env.DEEPSEEK_API_KEY ? "configured" : "missing",
+      note: process.env.DEEPSEEK_API_KEY ? "DeepSeek API key configured" : "DEEPSEEK_API_KEY not set",
     },
     outlook: {
       configured: Boolean(process.env.OUTLOOK_CLIENT_ID || process.env.MICROSOFT_CLIENT_ID),

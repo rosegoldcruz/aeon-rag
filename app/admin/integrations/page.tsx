@@ -30,8 +30,8 @@ export default async function AdminIntegrationsPage() {
     ["n8n", process.env.N8N_URL ? "configured" : "missing", process.env.N8N_URL || "N8N_URL missing"],
     [
       "AI Provider",
-      process.env.GOOGLE_VERTEX_PROJECT ? "configured" : "missing",
-      process.env.GOOGLE_VERTEX_PROJECT || "GOOGLE_VERTEX_PROJECT missing",
+      process.env.DEEPSEEK_API_KEY ? "configured" : "missing",
+      process.env.DEEPSEEK_API_KEY ? "DeepSeek API key configured" : "DEEPSEEK_API_KEY missing",
     ],
     [
       "Outlook",

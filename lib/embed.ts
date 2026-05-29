@@ -1,23 +1,13 @@
-import { embed, embedMany } from "ai"
+import { embedTextLocally, LOCAL_EMBEDDING_DIMENSION, LOCAL_EMBEDDING_MODEL_ID } from "@/lib/local-embeddings"
 
-export const EMBEDDING_MODEL_ID = "text-embedding-004"
-export const EXPECTED_EMBEDDING_DIMENSION = 768
-export const VERTEX_EMBED_BATCH_SIZE = 20
-export const VERTEX_EMBED_MAX_BATCH_CHARS = 40000
-export const VERTEX_EMBED_MAX_ESTIMATED_TOKENS = 18000
-
-async function getEmbeddingModel() {
-  const { vertex } = await import("@ai-sdk/google-vertex")
-  return vertex.textEmbeddingModel(EMBEDDING_MODEL_ID)
-}
+export const EMBEDDING_MODEL_ID = LOCAL_EMBEDDING_MODEL_ID
+export const EXPECTED_EMBEDDING_DIMENSION = LOCAL_EMBEDDING_DIMENSION
+export const EMBED_BATCH_SIZE = 200
+export const EMBED_MAX_BATCH_CHARS = 40000
+export const EMBED_MAX_ESTIMATED_TOKENS = 18000
 
 export async function embedText(text: string): Promise<number[]> {
-  const { embedding } = await embed({
-    model: await getEmbeddingModel(),
-    value: text,
-  })
-
-  return embedding
+  return embedTextLocally(text)
 }
 
 export async function embedBatch(texts: string[]): Promise<number[][]> {
@@ -25,7 +15,6 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
     return []
   }
 
-  const model = await getEmbeddingModel()
   const embeddings: number[][] = []
   const batches: { start: number; values: string[]; charCount: number; estimatedTokens: number }[] = []
   const estimateTokens = (text: string) => Math.max(1, text.length)
@@ -39,15 +28,15 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
     const charCount = text.length
     const estimatedTokens = estimateTokens(text)
 
-    if (charCount > VERTEX_EMBED_MAX_BATCH_CHARS || estimatedTokens > VERTEX_EMBED_MAX_ESTIMATED_TOKENS) {
+    if (charCount > EMBED_MAX_BATCH_CHARS || estimatedTokens > EMBED_MAX_ESTIMATED_TOKENS) {
       throw new Error(
-        `Embedding input ${index} exceeds safe request budget: chars=${charCount}, estimatedTokens=${estimatedTokens}, maxBatchChars=${VERTEX_EMBED_MAX_BATCH_CHARS}, maxEstimatedTokens=${VERTEX_EMBED_MAX_ESTIMATED_TOKENS}. Split the chunk before embedding.`,
+        `Embedding input ${index} exceeds safe request budget: chars=${charCount}, estimatedTokens=${estimatedTokens}, maxBatchChars=${EMBED_MAX_BATCH_CHARS}, maxEstimatedTokens=${EMBED_MAX_ESTIMATED_TOKENS}. Split the chunk before embedding.`,
       )
     }
 
-    const wouldExceedCount = currentValues.length >= VERTEX_EMBED_BATCH_SIZE
-    const wouldExceedChars = currentChars + charCount > VERTEX_EMBED_MAX_BATCH_CHARS
-    const wouldExceedEstimatedTokens = currentEstimatedTokens + estimatedTokens > VERTEX_EMBED_MAX_ESTIMATED_TOKENS
+    const wouldExceedCount = currentValues.length >= EMBED_BATCH_SIZE
+    const wouldExceedChars = currentChars + charCount > EMBED_MAX_BATCH_CHARS
+    const wouldExceedEstimatedTokens = currentEstimatedTokens + estimatedTokens > EMBED_MAX_ESTIMATED_TOKENS
 
     if (currentValues.length > 0 && (wouldExceedCount || wouldExceedChars || wouldExceedEstimatedTokens)) {
       batches.push({
@@ -85,16 +74,13 @@ export async function embedBatch(texts: string[]): Promise<number[][]> {
     const values = batch.values
 
     try {
-      const result = await embedMany({
-        model,
-        values,
-      })
+      const result = values.map((value) => embedTextLocally(value))
 
-      if (result.embeddings.length !== values.length) {
-        throw new Error(`Embedding batch ${batchIndex} returned ${result.embeddings.length} embeddings for ${values.length} inputs.`)
+      if (result.length !== values.length) {
+        throw new Error(`Embedding batch ${batchIndex} returned ${result.length} embeddings for ${values.length} inputs.`)
       }
 
-      embeddings.push(...result.embeddings)
+      embeddings.push(...result)
     } catch (error) {
       const safeMessage = error instanceof Error ? error.message : "Unknown embedding batch failure"
       throw new Error(

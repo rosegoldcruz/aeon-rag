@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises"
 import { extname } from "node:path"
-import { embed } from "ai"
-import { vertex } from "@ai-sdk/google-vertex"
+import { embedTextLocally, LOCAL_EMBEDDING_DIMENSION, LOCAL_EMBEDDING_MODEL_ID } from "@/lib/local-embeddings"
 
-export const EMBEDDING_MODEL = process.env.VERTEX_EMBED_MODEL || "text-embedding-005"
-export const EMBEDDING_DIMENSION = 768
+export const EMBEDDING_MODEL = process.env.RAG_EMBED_MODEL || LOCAL_EMBEDDING_MODEL_ID
+export const EMBEDDING_DIMENSION = LOCAL_EMBEDDING_DIMENSION
 
 export type ParsedFile = {
   supported: boolean
@@ -79,18 +78,15 @@ export function chunkText(text: string, chunkSize = 900, overlap = 120) {
 }
 
 export async function embedText(value: string) {
-  const result = await embed({
-    model: vertex.textEmbeddingModel(EMBEDDING_MODEL),
-    value,
-  })
+  const embedding = embedTextLocally(value)
 
-  if (result.embedding.length !== EMBEDDING_DIMENSION) {
+  if (embedding.length !== EMBEDDING_DIMENSION) {
     throw new Error(
-      `Unexpected embedding dimension: got ${result.embedding.length}, expected ${EMBEDDING_DIMENSION}.`,
+      `Unexpected embedding dimension: got ${embedding.length}, expected ${EMBEDDING_DIMENSION}.`,
     )
   }
 
-  return result.embedding
+  return embedding
 }
 
 export async function embedChunks(chunks: string[]) {

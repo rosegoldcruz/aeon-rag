@@ -101,9 +101,8 @@ type ToolPanelItem = {
 }
 
 const MODEL_FALLBACK: ModelOption[] = [
-  { id: "gemini-2.5-flash", label: "AEON Core" },
-  { id: "gemini-2.5-pro", label: "AEON Deep Focus" },
-  { id: "gemini-2.0-flash", label: "AEON Swift" },
+  { id: "deepseek-v4-flash", label: "AEON Core" },
+  { id: "deepseek-v4-pro", label: "AEON Deep Focus" },
 ]
 
 const MODE_LABEL: Record<ChatMode, string> = {

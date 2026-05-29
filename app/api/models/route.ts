@@ -1,13 +1,10 @@
 import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
+import { DEEPSEEK_BASE_URL, DEEPSEEK_MODELS, getDefaultDeepSeekModel } from "@/lib/deepseek"
 import { getRagStats } from "@/lib/rag/db"
 
-const MODELS = [
-  { id: "gemini-2.5-flash", label: "AEON Core" },
-  { id: "gemini-2.5-pro", label: "AEON Deep Focus" },
-  { id: "gemini-2.0-flash", label: "AEON Swift" },
-]
+const MODELS = DEEPSEEK_MODELS
 
 export const runtime = "nodejs"
 
@@ -46,14 +43,11 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     models: MODELS,
-    selected: MODELS.some((item) => item.id === process.env.VERTEX_MODEL)
-      ? process.env.VERTEX_MODEL
-      : "gemini-2.5-flash",
+    selected: getDefaultDeepSeekModel(),
     status: {
-      vertexProjectConfigured: Boolean(process.env.GOOGLE_VERTEX_PROJECT),
-      vertexLocationConfigured: Boolean(process.env.GOOGLE_VERTEX_LOCATION),
-      vertexProject: process.env.GOOGLE_VERTEX_PROJECT ? "configured" : "not configured",
-      vertexLocation: process.env.GOOGLE_VERTEX_LOCATION ? "configured" : "not configured",
+      aiProviderConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
+      aiProvider: process.env.DEEPSEEK_API_KEY ? "DeepSeek configured" : "DeepSeek not configured",
+      aiProviderBaseURL: DEEPSEEK_BASE_URL,
       voiceInput: "browser-dependent",
       uploadStorage: uploadReady ? "enabled" : "ready-on-first-upload",
       ragIngestion: retrievalEnabled ? "enabled" : "coming next",

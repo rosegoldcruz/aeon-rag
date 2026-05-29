@@ -1,5 +1,4 @@
 import { generateText } from "ai"
-import { access } from "node:fs/promises"
 import { NextResponse } from "next/server"
 import { getAuthenticatedSession, unauthorizedResponse } from "@/auth"
 import {
@@ -9,6 +8,14 @@ import {
   makeSessionTitleFromMessage,
   updateSessionTitleIfNew,
 } from "@/lib/chat-store"
+import {
+  createDeepSeekProvider,
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_MODELS,
+  getDefaultDeepSeekModel,
+  getDeepSeekApiKey,
+  isDeepSeekModel,
+} from "@/lib/deepseek"
 import { retrieveContext } from "@/lib/retrieve"
 
 type ChatMode = "chat" | "brainstorm" | "plan" | "image_prompt"
@@ -27,12 +34,8 @@ type ChatRequest = {
   }
 }
 
-const SUPPORTED_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"] as const
-
-const configuredModel = (process.env.VERTEX_MODEL || "").trim()
-const DEFAULT_MODEL = SUPPORTED_MODELS.includes(configuredModel as (typeof SUPPORTED_MODELS)[number])
-  ? configuredModel
-  : "gemini-2.5-flash"
+const SUPPORTED_MODELS = DEEPSEEK_MODELS.map((model) => model.id)
+const DEFAULT_MODEL = getDefaultDeepSeekModel()
 const SYSTEM_PROMPT =
   "You are AEON, an internal operations intelligence agent for SNRG Labs. You are a sharp systems partner, not a corporate chatbot. Default to short, direct answers in plain operational language. Prioritize what changed, what is broken, what matters, and the next move. Do not pad responses with generic bullet lists. Do not over-explain obvious concepts. Do not invent data. When using RAG, ground answers in retrieved context. If context is missing, state exactly what is missing and which query or tool would surface it. Match the user's urgency without becoming chaotic. Be useful, blunt, and execution-focused."
 
@@ -55,38 +58,16 @@ function isResponseStyle(value: unknown): value is ResponseStyle {
   return value === "balanced" || value === "direct" || value === "detailed"
 }
 
-async function validateVertexConfig() {
-  const project = process.env.GOOGLE_VERTEX_PROJECT
-  const location = process.env.GOOGLE_VERTEX_LOCATION
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
-
-  if (!project || !location) {
-    return {
-      ok: false as const,
-      message:
-        "Vertex is not configured. Missing GOOGLE_VERTEX_PROJECT or GOOGLE_VERTEX_LOCATION environment variables.",
-    }
-  }
-
-  if (!credentialsPath) {
-    return {
-      ok: false as const,
-      message:
-        "Vertex credentials are missing. Set GOOGLE_APPLICATION_CREDENTIALS to a valid service account JSON path.",
-    }
-  }
-
+function validateDeepSeekConfig() {
   try {
-    await access(credentialsPath)
-  } catch {
+    getDeepSeekApiKey()
+    return { ok: true as const }
+  } catch (error) {
     return {
       ok: false as const,
-      message:
-        "Vertex credentials file was not found at GOOGLE_APPLICATION_CREDENTIALS. Update the path or provide valid credentials.",
+      message: error instanceof Error ? error.message : "DeepSeek is not configured.",
     }
   }
-
-  return { ok: true as const }
 }
 
 export async function POST(request: Request) {
@@ -113,9 +94,7 @@ export async function POST(request: Request) {
   const message = typeof body.message === "string" ? body.message.trim() : ""
   const mode: ChatMode = isMode(body.mode) ? body.mode : "chat"
   const requestedModel = typeof body.model === "string" && body.model.trim() ? body.model.trim() : DEFAULT_MODEL
-  const model = SUPPORTED_MODELS.includes(requestedModel as (typeof SUPPORTED_MODELS)[number])
-    ? requestedModel
-    : DEFAULT_MODEL
+  const model = isDeepSeekModel(requestedModel) ? requestedModel : DEFAULT_MODEL
   const sessionIdInput = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : ""
   const attachments = Array.isArray(body.attachments) ? body.attachments : []
   const responseStyle = isResponseStyle(body.options?.responseStyle) ? body.options?.responseStyle : "balanced"
@@ -132,7 +111,7 @@ export async function POST(request: Request) {
     )
   }
 
-  const configCheck = await validateVertexConfig()
+  const configCheck = validateDeepSeekConfig()
   if (!configCheck.ok) {
     return NextResponse.json(
       {
@@ -181,27 +160,13 @@ export async function POST(request: Request) {
     }
   }
 
-  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
-  let credentialsFileExists = false
-
-  if (credentialsPath) {
-    try {
-      await access(credentialsPath)
-      credentialsFileExists = true
-    } catch {
-      credentialsFileExists = false
-    }
-  }
-
   const candidateModels = Array.from(new Set([model, DEFAULT_MODEL, ...FALLBACK_MODELS].filter(Boolean)))
 
-  console.info("[api/chat] Vertex request start", {
+  console.info("[api/chat] DeepSeek request start", {
     selectedModel: model,
     candidateModels,
-    hasProjectId: Boolean(process.env.GOOGLE_VERTEX_PROJECT),
-    hasLocation: Boolean(process.env.GOOGLE_VERTEX_LOCATION),
-    hasCredentialsPath: Boolean(credentialsPath),
-    credentialsFileExists,
+    baseURL: DEEPSEEK_BASE_URL,
+    apiKeyConfigured: Boolean(process.env.DEEPSEEK_API_KEY),
     mode,
     attachmentCount: attachments.length,
     useUploadedContext,
@@ -219,8 +184,8 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .join("\n\n")
 
-  let lastError = "Unknown Vertex request failure"
-  const { vertex } = await import("@ai-sdk/google-vertex")
+  let lastError = "Unknown DeepSeek request failure"
+  const deepseek = createDeepSeekProvider()
 
   let sessionId = sessionIdInput
   if (sessionId) {
@@ -247,12 +212,12 @@ export async function POST(request: Request) {
   for (const candidate of candidateModels) {
     try {
       const result = await generateText({
-        model: vertex(candidate),
+        model: deepseek(candidate),
         system: combinedSystem,
         prompt: message,
       })
 
-      console.info("[api/chat] Vertex response received", {
+      console.info("[api/chat] DeepSeek response received", {
         usedModel: candidate,
         textLength: result.text.length,
       })
@@ -274,9 +239,9 @@ export async function POST(request: Request) {
         ...(retrievedSources.length > 0 ? { sources: retrievedSources } : {}),
       })
     } catch (error) {
-      const safeMessage = error instanceof Error ? error.message : "Unknown Vertex request failure"
+      const safeMessage = error instanceof Error ? error.message : "Unknown DeepSeek request failure"
       lastError = safeMessage
-      console.error("[api/chat] Vertex model attempt failed", {
+      console.error("[api/chat] DeepSeek model attempt failed", {
         attemptedModel: candidate,
         message: safeMessage,
       })
@@ -286,7 +251,7 @@ export async function POST(request: Request) {
   return NextResponse.json(
     {
       ok: false,
-      error: `Vertex model call failed: ${lastError}`,
+      error: `DeepSeek model call failed: ${lastError}`,
     },
     { status: 502 },
   )
